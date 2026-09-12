@@ -1,0 +1,28 @@
+{
+  "_comment": "SSK-trupp 2026/27 (källa: eliteprospects, hämtad sep 2026). Verifiera mot sodertaljesk.se/team vid säsongsstart. Kör: npm run seed:roster",
+  "players": [
+    { "full_name": "Love Härenstam", "position": "G", "jersey_no": 73 },
+    { "full_name": "Teodor Munther", "position": "G", "jersey_no": 35 },
+    { "full_name": "Niklas Arell", "position": "D", "jersey_no": 44 },
+    { "full_name": "Felix Carell", "position": "D", "jersey_no": 74 },
+    { "full_name": "Roope Laavainen", "position": "D", "jersey_no": 82 },
+    { "full_name": "Jonatan Lundgren", "position": "D", "jersey_no": 5 },
+    { "full_name": "Niklas Nilsson", "position": "D", "jersey_no": 4 },
+    { "full_name": "Daniel Norbe", "position": "D", "jersey_no": 27 },
+    { "full_name": "Ludvig Söderberg", "position": "D", "jersey_no": 6 },
+    { "full_name": "Tarun Fizer", "position": "F", "jersey_no": 8 },
+    { "full_name": "Hampus Harlestam", "position": "F", "jersey_no": 9 },
+    { "full_name": "Adam Hesselvall", "position": "F", "jersey_no": 28 },
+    { "full_name": "Filip Holst Persson", "position": "F", "jersey_no": 88 },
+    { "full_name": "Joni Ikonen", "position": "F", "jersey_no": 16 },
+    { "full_name": "Måns Lindbäck", "position": "F", "jersey_no": 33 },
+    { "full_name": "Daniel Muzito-Bagenda", "position": "F", "jersey_no": 19 },
+    { "full_name": "Gabriel Olsson", "position": "F", "jersey_no": 81 },
+    { "full_name": "Gustav Salmi-Lilja", "position": "F", "jersey_no": 17 },
+    { "full_name": "Linus Skager", "position": "F", "jersey_no": 61 },
+    { "full_name": "Carter Souch", "position": "F", "jersey_no": 18 },
+    { "full_name": "Nolan Stevens", "position": "F", "jersey_no": 21 },
+    { "full_name": "A.J. Vanderbeck", "position": "F", "jersey_no": 91 },
+    { "full_name": "Teemu Väyrynen", "position": "F", "jersey_no": 95 }
+  ]
+}

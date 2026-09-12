@@ -1,0 +1,34 @@
+{
+  "name": "ssk-femman",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fantasy hockey game for Södertälje SK (HockeyAllsvenskan)",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "seed:roster": "tsx scripts/seed-roster.ts",
+    "ingest:schedule": "tsx scripts/run-ingest.ts schedule",
+    "ingest:results": "tsx scripts/run-ingest.ts results"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.5.2",
+    "@supabase/supabase-js": "^2.45.4",
+    "cheerio": "^1.0.0",
+    "next": "14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "dotenv": "^16.4.5",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}
