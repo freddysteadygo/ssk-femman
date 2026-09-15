@@ -43,7 +43,7 @@ export default async function LeagueStandings({ params }: { params: { id: string
 
       <div className="card overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-ssk-dark text-ssk-muted">
+          <thead className="bg-ssk-navy text-white">
             <tr>
               <th className="px-4 py-2 text-left">#</th>
               <th className="px-4 py-2 text-left">Spelare</th>

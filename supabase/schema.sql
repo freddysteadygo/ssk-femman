@@ -30,10 +30,11 @@ exception when duplicate_object then null; end $$;
 -- ============================================================
 create table if not exists profiles (
   id          uuid primary key references auth.users(id) on delete cascade,
-  username    text unique not null,
-  email       text,
-  is_admin    boolean not null default false,
-  created_at  timestamptz not null default now()
+  username     text unique not null,
+  email        text,
+  is_admin     boolean not null default false,
+  notify_round boolean not null default true,  -- mejlnotis inför omgångar
+  created_at   timestamptz not null default now()
 );
 
 -- ============================================================
@@ -60,6 +61,7 @@ create table if not exists rounds (
   name        text,                       -- t.ex. "Omgång 12"
   deadline    timestamptz not null,       -- lås för femma/tips (oftast första matchens start)
   status      round_status not null default 'open',
+  reminded_at timestamptz,                -- när notis-mejl skickats för omgången
   created_at  timestamptz not null default now(),
   unique (number)
 );

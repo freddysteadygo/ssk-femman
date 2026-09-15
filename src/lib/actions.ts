@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "./supabase/server";
 import { createAdminClient } from "./supabase/admin";
 import { recomputeRound } from "./ingest";
-import { scoreSkater, scoreTip } from "./scoring";
+import { scoreSkater, scoreTip, regulationScore } from "./scoring";
 import type { AdminSkaterLine, AdminGoalieLine } from "./types";
 
 async function requireUser() {
@@ -24,6 +24,21 @@ async function requireAdmin() {
 }
 
 // ------------------------------------------------------------
+// INSTÄLLNINGAR
+// ------------------------------------------------------------
+export async function setNotifyRound(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { sb, user } = await requireUser();
+    const { error } = await sb.from("profiles").update({ notify_round: enabled }).eq("id", user.id);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/installningar");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+// ------------------------------------------------------------
 // FEMMA
 // ------------------------------------------------------------
 export async function saveEntry(
@@ -34,8 +49,16 @@ export async function saveEntry(
   try {
     const { sb, user } = await requireUser();
 
-    if (playerIds.length !== 5) return { ok: false, error: "Välj exakt 5 utespelare." };
+    if (playerIds.length !== 5) return { ok: false, error: "Välj exakt 5 spelare (2 backar + 3 forwards)." };
     if (new Set(playerIds).size !== 5) return { ok: false, error: "Dubbletter bland spelarna." };
+
+    // Validera sammansättning: exakt 2 backar + 3 forwards
+    const { data: chosen } = await sb.from("players").select("id, position").in("id", playerIds);
+    const backs = (chosen ?? []).filter((p) => p.position === "D").length;
+    const fwds = (chosen ?? []).filter((p) => p.position === "F").length;
+    if (backs !== 2 || fwds !== 3) {
+      return { ok: false, error: "Femman måste vara exakt 2 backar och 3 forwards." };
+    }
 
     const { data: round } = await sb.from("rounds").select("*").eq("id", roundId).single();
     if (!round) return { ok: false, error: "Omgången finns inte." };
@@ -170,7 +193,8 @@ export async function adminSaveMatch(
   sskGoals: number,
   oppGoals: number,
   skaters: AdminSkaterLine[],
-  goalies: AdminGoalieLine[]
+  goalies: AdminGoalieLine[],
+  overtime: boolean = false
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     await requireAdmin();
@@ -227,16 +251,17 @@ export async function adminSaveMatch(
         status: "final",
         ssk_goals: sskGoals,
         opp_goals: oppGoals,
-        result: sskWon ? "W" : sskGoals === oppGoals ? "T" : "L",
+        result: overtime ? (sskWon ? "OTW" : "OTL") : sskWon ? "W" : sskGoals === oppGoals ? "T" : "L",
       })
       .eq("id", matchId);
 
-    // tips för matchen
+    // tips för matchen — räknas mot ordinarie tid
+    const reg = regulationScore(sskGoals, oppGoals, overtime);
     const { data: tips } = await admin.from("result_tips").select("*").eq("match_id", matchId);
     for (const t of tips ?? []) {
       await admin
         .from("result_tips")
-        .update({ points: scoreTip(t.pred_ssk, t.pred_opp, sskGoals, oppGoals) })
+        .update({ points: scoreTip(t.pred_ssk, t.pred_opp, reg.ssk, reg.opp) })
         .eq("id", t.id);
     }
 

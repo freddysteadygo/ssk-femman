@@ -16,6 +16,7 @@ export function AdminMatchForm({ matches, players }: { matches: Match[]; players
   const [matchId, setMatchId] = useState("");
   const [sskGoals, setSskGoals] = useState(0);
   const [oppGoals, setOppGoals] = useState(0);
+  const [overtime, setOvertime] = useState(false);
   const [skaters, setSkaters] = useState<AdminSkaterLine[]>([emptySkater()]);
   const [goalies, setGoalies] = useState<AdminGoalieLine[]>([emptyGoalie()]);
   const [msg, setMsg] = useState<string | null>(null);
@@ -35,7 +36,8 @@ export function AdminMatchForm({ matches, players }: { matches: Match[]; players
         sskGoals,
         oppGoals,
         skaters.filter((s) => s.player_id),
-        goalies.filter((g) => g.player_id)
+        goalies.filter((g) => g.player_id),
+        overtime
       );
       setMsg(res.ok ? "Sparat & poäng omräknad ✓" : res.error ?? "Fel.");
     });
@@ -64,6 +66,10 @@ export function AdminMatchForm({ matches, players }: { matches: Match[]; players
             <input type="number" min={0} className="input w-16 text-center"
               value={oppGoals} onChange={(e) => setOppGoals(+e.target.value)} />
             <span className="label">({match.opponent})</span>
+            <label className="ml-3 flex items-center gap-1 text-sm">
+              <input type="checkbox" checked={overtime} onChange={(e) => setOvertime(e.target.checked)} />
+              Avgjord på förlängning/straffar (OT/SO)
+            </label>
           </div>
         )}
       </div>

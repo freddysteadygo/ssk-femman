@@ -3,28 +3,28 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
-  @apply bg-ssk-black text-white antialiased;
+  @apply bg-ssk-gold text-ssk-ink antialiased;
 }
 
 .card {
-  @apply bg-ssk-card border border-ssk-line rounded-xl;
+  @apply bg-ssk-cream border border-ssk-line rounded-xl text-ssk-ink shadow-sm;
 }
 
 .btn {
   @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed;
 }
 .btn-primary {
-  @apply btn bg-ssk-orange hover:bg-ssk-orangeDark text-white;
+  @apply btn bg-ssk-blue hover:bg-ssk-blueDark text-white;
 }
 .btn-ghost {
-  @apply btn border border-ssk-line hover:bg-ssk-dark text-white;
+  @apply btn border border-ssk-line bg-ssk-cream hover:bg-ssk-goldSoft text-ssk-ink;
 }
 .input {
-  @apply bg-ssk-dark border border-ssk-line rounded-lg px-3 py-2 text-white placeholder:text-ssk-muted focus:outline-none focus:border-ssk-orange;
+  @apply bg-white border border-ssk-line rounded-lg px-3 py-2 text-ssk-ink placeholder:text-ssk-muted focus:outline-none focus:border-ssk-blue;
 }
 .label {
   @apply text-sm text-ssk-muted;

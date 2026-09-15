@@ -64,6 +64,7 @@ export interface GameSummary {
   goals: ScrapedGoalEvent[];
   penalties: ScrapedPenalty[];
   goalies: { home: ScrapedGoalie[]; away: ScrapedGoalie[] };
+  overtime: boolean; // avgjord på förlängning/straffar (bäst-gissning — verifiera/justera i admin)
 }
 
 // ------------------------------------------------------------
@@ -127,23 +128,35 @@ export async function getSskSchedule(
   const $ = cheerio.load(html);
   const out: ScheduledMatch[] = [];
 
-  // Varje matchrad har typ: Datum | Tid | Match "Hemma - Borta" | Resultat, med länk /Game/Events/{id}
+  // VIKTIGT: swehockey skriver bara ut datumet på dagens FÖRSTA match.
+  // Resten av dagens matcher har tom datumcell — så vi bär med senaste datum
+  // radvis medan vi går igenom ALLA rader (inte bara SSK-raderna).
+  let currentDate = "";
+
   $("tr").each((_, tr) => {
     const row = $(tr);
-    const text = clean(row.text());
-    if (!text.toLowerCase().includes(teamName.toLowerCase())) return;
+    const cells = row
+      .find("td")
+      .map((__, td) => clean($(td).text()))
+      .get();
+    if (!cells.length) return;
+
+    // Uppdatera datum om raden innehåller ett
+    const dateInRow = cells.map((c) => (c.match(/\d{4}-\d{2}-\d{2}/) || [])[0]).find(Boolean);
+    if (dateInRow) currentDate = dateInRow;
+
+    // Bara SSK-matcher
+    if (!cells.some((c) => c.toLowerCase().includes(teamName.toLowerCase()))) return;
+    const matchCell = cells.find(
+      (c) => c.includes(" - ") && c.toLowerCase().includes(teamName.toLowerCase())
+    );
+    if (!matchCell) return;
 
     const link = row.find('a[href*="/Game/"]').attr("href") || "";
     const idMatch = link.match(/\/Game\/\w+\/(\d+)/);
     const gameId = idMatch ? idMatch[1] : null;
 
-    // Försök hitta "Lag A - Lag B" och ev. "x - y"
-    const cells = row
-      .find("td")
-      .map((__, td) => clean($(td).text()))
-      .get();
-
-    const parsed = parseScheduleRow(cells, teamName);
+    const parsed = parseScheduleRow(cells, matchCell, currentDate, teamName);
     if (parsed) out.push({ ...parsed, swehockeyGameId: gameId });
   });
 
@@ -152,33 +165,31 @@ export async function getSskSchedule(
 
 function parseScheduleRow(
   cells: string[],
+  matchCell: string,
+  currentDate: string,
   teamName: string
 ): Omit<ScheduledMatch, "swehockeyGameId"> | null {
-  // Hitta cellen som innehåller " - " med lagnamn
-  const matchCell = cells.find(
-    (c) => c.includes(" - ") && /[A-Za-zÅÄÖåäö]/.test(c) && c.toLowerCase().includes(teamName.toLowerCase())
-  );
-  if (!matchCell) return null;
-
   const [homeRaw, awayRaw] = matchCell.split(" - ").map((s) => s.trim());
+  if (!homeRaw || !awayRaw) return null;
   const isHome = homeRaw.toLowerCase().includes(teamName.toLowerCase());
   const opponent = isHome ? awayRaw : homeRaw;
 
-  // Datum: första cell som ser ut som ett datum
-  const dateCell =
-    cells.find((c) => /\d{4}-\d{2}-\d{2}/.test(c)) ||
-    cells.find((c) => /\d{2}[/.]\d{2}/.test(c)) ||
-    "";
-  const timeCell = cells.find((c) => /^\d{1,2}[:.]\d{2}$/.test(c)) || "";
-  const date = clean(`${dateCell} ${timeCell}`);
+  // Tid: egen tidscell, annars första tiden i någon cell
+  const timeCell =
+    cells.find((c) => /^\d{1,2}[:.]\d{2}$/.test(c)) ||
+    (cells.map((c) => (c.match(/\b\d{1,2}[:.]\d{2}\b/) || [])[0]).find(Boolean) ?? "");
+  const date = clean(`${currentDate} ${timeCell}`);
+  if (!currentDate) return null; // utan datum kan vi inte placera matchen
 
-  // Resultat: cell som "x - y" med siffror
-  const scoreCell = cells.find((c) => /^\d+\s*-\s*\d+/.test(c));
+  // Resultat: egen cell "x - y" med 1–2-siffriga tal (inte år/datum)
+  const isScoreCell = (c: string) =>
+    !/\d{4}/.test(c) && /^\s*\d{1,2}\s*[-–]\s*\d{1,2}\b/.test(c);
+  const scoreCell = cells.find(isScoreCell);
   let sskGoals: number | null = null;
   let oppGoals: number | null = null;
   let played = false;
   if (scoreCell) {
-    const m = scoreCell.match(/(\d+)\s*-\s*(\d+)/);
+    const m = scoreCell.match(/^\s*(\d{1,2})\s*[-–]\s*(\d{1,2})/);
     if (m) {
       const h = parseInt(m[1], 10);
       const a = parseInt(m[2], 10);
@@ -192,10 +203,12 @@ function parseScheduleRow(
 }
 
 function dedupeByGameId(arr: ScheduledMatch[]): ScheduledMatch[] {
+  // En rad per unik match: datum (utan tid) + motståndare + hemma/borta.
   const seen = new Set<string>();
   const out: ScheduledMatch[] = [];
   for (const m of arr) {
-    const key = m.swehockeyGameId ?? `${m.date}-${m.opponent}`;
+    const ymd = (m.date.match(/\d{4}-\d{2}-\d{2}/) || [""])[0];
+    const key = `${ymd}|${m.opponent.toLowerCase()}|${m.isHome ? "H" : "B"}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(m);
@@ -258,6 +271,9 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
     }
   }
 
+  // Bäst-gissning om matchen avgjordes på förlängning/straffar.
+  const overtime = /\bgws\b|straffl[aä]ggning|straffar|sudden\s*death|efter\s*f[öo]rl[äa]ng|\bövertid\b|\bo\.?t\.?\b/i.test(html);
+
   return {
     gameId,
     homeTeam,
@@ -267,6 +283,7 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
     goals,
     penalties,
     goalies: { home: goaliesHome, away: goaliesAway },
+    overtime,
   };
 }
 

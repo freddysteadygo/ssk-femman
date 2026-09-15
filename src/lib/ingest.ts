@@ -12,7 +12,7 @@ import {
   normalizeName,
   type GameSummary,
 } from "./swehockey";
-import { scoreSkater, scoreGoalie, scoreTip } from "./scoring";
+import { scoreSkater, scoreGoalie, scoreTip, regulationScore } from "./scoring";
 
 type Sb = ReturnType<typeof createAdminClient>;
 
@@ -85,28 +85,46 @@ export async function syncSchedule(): Promise<{ rounds: number; matches: number 
     for (const f of fs) {
       const d = parseDate(f.date);
       if (!d) continue;
+      const startIso = d.toISOString();
       const status = f.played ? "final" : d.getTime() < Date.now() ? "live" : "upcoming";
-      await sb.from("matches").upsert(
-        {
-          round_id: round?.id,
-          swehockey_game_id: f.swehockeyGameId,
-          opponent: f.opponent,
-          is_home: f.isHome,
-          starts_at: d.toISOString(),
-          status,
-          ssk_goals: f.sskGoals,
-          opp_goals: f.oppGoals,
-          result:
-            f.played && f.sskGoals != null && f.oppGoals != null
-              ? f.sskGoals > f.oppGoals
-                ? "W"
-                : f.sskGoals < f.oppGoals
-                ? "L"
-                : "T"
-              : null,
-        },
-        { onConflict: "swehockey_game_id" }
-      );
+      const payload = {
+        round_id: round?.id,
+        swehockey_game_id: f.swehockeyGameId,
+        opponent: f.opponent,
+        is_home: f.isHome,
+        starts_at: startIso,
+        status,
+        ssk_goals: f.sskGoals,
+        opp_goals: f.oppGoals,
+        result:
+          f.played && f.sskGoals != null && f.oppGoals != null
+            ? f.sskGoals > f.oppGoals
+              ? "W"
+              : f.sskGoals < f.oppGoals
+              ? "L"
+              : "T"
+            : null,
+      };
+
+      // Idempotent: hitta befintlig match (på game-id, annars motståndare+tid)
+      // så upprepade körningar uppdaterar istället för att skapa dubbletter.
+      let existing: { id: string } | null = null;
+      if (f.swehockeyGameId) {
+        const r = await sb.from("matches").select("id").eq("swehockey_game_id", f.swehockeyGameId).maybeSingle();
+        existing = r.data;
+      }
+      if (!existing) {
+        const r = await sb
+          .from("matches")
+          .select("id")
+          .eq("opponent", f.opponent)
+          .eq("starts_at", startIso)
+          .maybeSingle();
+        existing = r.data;
+      }
+
+      if (existing) await sb.from("matches").update(payload).eq("id", existing.id);
+      else await sb.from("matches").insert(payload);
       matchesUpserted++;
     }
   }
@@ -299,22 +317,30 @@ async function settleOneMatch(
     });
   }
 
-  // uppdatera matchresultat
+  const overtime = summary.overtime;
+
+  // uppdatera matchresultat (OT/SO-varianter så tipset kan räknas på ordinarie tid)
   await sb
     .from("matches")
     .update({
       status: "final",
       ssk_goals: sskGoals,
       opp_goals: oppGoals,
-      result: sskGoals != null && oppGoals != null ? (sskWon ? "W" : sskGoals === oppGoals ? "T" : "L") : null,
+      result:
+        sskGoals != null && oppGoals != null
+          ? overtime
+            ? sskWon ? "OTW" : "OTL"
+            : sskWon ? "W" : sskGoals === oppGoals ? "T" : "L"
+          : null,
     })
     .eq("id", match.id);
 
-  // ---- Resultattips för matchen ----
+  // ---- Resultattips: räknas mot ordinarie tid ----
   if (sskGoals != null && oppGoals != null) {
+    const reg = regulationScore(sskGoals, oppGoals, overtime);
     const { data: tips } = await sb.from("result_tips").select("*").eq("match_id", match.id);
     for (const t of tips ?? []) {
-      const pts = scoreTip(t.pred_ssk, t.pred_opp, sskGoals, oppGoals);
+      const pts = scoreTip(t.pred_ssk, t.pred_opp, reg.ssk, reg.opp);
       await sb.from("result_tips").update({ points: pts }).eq("id", t.id);
     }
   }

@@ -10,6 +10,8 @@ export default async function Home() {
   return (
     <div className="space-y-10">
       <section className="text-center py-10">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/ssk-logo.svg" alt="Södertälje SK" className="mx-auto mb-6 h-24 w-24" />
         <h1 className="text-4xl font-extrabold tracking-tight">
           Bygg din <span className="text-ssk-orange">femma</span>.
         </h1>

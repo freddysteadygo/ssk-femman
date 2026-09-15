@@ -71,7 +71,24 @@ export function scoreGoalie(g: GoalieLine, guessedStarted: boolean): number {
   return round2(p);
 }
 
-/** Poäng för ett resultattips mot facit. */
+/**
+ * Resultat efter ORDINARIE tid, härlett ur slutresultatet.
+ * Gick matchen till förlängning/straffar var ordinarie tid oavgjort
+ * (på det lägre antalet mål), annars = slutresultatet.
+ */
+export function regulationScore(
+  finalSsk: number,
+  finalOpp: number,
+  overtime: boolean
+): { ssk: number; opp: number } {
+  if (overtime) {
+    const lo = Math.min(finalSsk, finalOpp);
+    return { ssk: lo, opp: lo };
+  }
+  return { ssk: finalSsk, opp: finalOpp };
+}
+
+/** Poäng för ett resultattips mot facit (ordinarie tid). */
 export function scoreTip(
   predSsk: number,
   predOpp: number,
