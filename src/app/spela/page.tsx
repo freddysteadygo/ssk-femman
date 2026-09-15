@@ -44,7 +44,7 @@ export default async function SpelaPage() {
   const [{ data: players }, { data: matches }, { data: entry }] = await Promise.all([
     sb.from("players").select("*").eq("active", true).order("position").order("full_name"),
     // Tips: alla kommande matcher (flera omgångar fram), inte bara aktuell omgång
-    sb.from("matches").select("*").eq("status", "upcoming").gte("starts_at", nowIso).order("starts_at").limit(40),
+    sb.from("matches").select("*").eq("status", "upcoming").gte("starts_at", nowIso).order("starts_at").limit(120),
     sb.from("entries").select("id, goalie_id").eq("round_id", round.id).eq("user_id", user.id).maybeSingle(),
   ]);
 

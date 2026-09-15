@@ -22,6 +22,7 @@ export async function Nav() {
           SSK-femman
         </Link>
         <div className="flex items-center gap-4 text-sm">
+          <Link href="/scoreboard" className="text-white/90 hover:text-ssk-yellow">Scoreboard</Link>
           <Link href="/regler" className="text-white/90 hover:text-ssk-yellow">Regler</Link>
           {user ? (
             <>

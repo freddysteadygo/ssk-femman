@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "next lint",
     "seed:roster": "tsx scripts/seed-roster.ts",
+    "seed:leagues": "tsx scripts/seed-leagues.ts",
     "ingest:schedule": "tsx scripts/run-ingest.ts schedule",
     "ingest:results": "tsx scripts/run-ingest.ts results"
   },

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
 
@@ -44,6 +45,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </div>
             <p className="mt-6 text-center text-xs text-white/50">
               SSK-femman · inofficiellt fanprojekt · data från stats.swehockey.se
+            </p>
+            <p className="mt-2 text-center text-xs">
+              <Link href="/integritetspolicy" className="text-white/60 hover:text-ssk-yellow hover:underline">
+                Integritetspolicy
+              </Link>
             </p>
           </div>
         </footer>

@@ -38,6 +38,22 @@ export async function setNotifyRound(enabled: boolean): Promise<{ ok: boolean; e
   }
 }
 
+export async function setTeamName(name: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { sb, user } = await requireUser();
+    const clean = name.trim().replace(/\s+/g, " ").slice(0, 40);
+    if (clean.length < 2) return { ok: false, error: "Lagnamnet måste vara minst 2 tecken." };
+    const { error } = await sb.from("profiles").update({ team_name: clean }).eq("id", user.id);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/installningar");
+    revalidatePath("/ligor");
+    revalidatePath("/scoreboard");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
 // ------------------------------------------------------------
 // FEMMA
 // ------------------------------------------------------------
@@ -179,6 +195,76 @@ export async function leaveLeague(leagueId: string): Promise<{ ok: boolean; erro
     const { sb, user } = await requireUser();
     await sb.from("league_members").delete().eq("league_id", leagueId).eq("user_id", user.id);
     revalidatePath("/ligor");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+// ------------------------------------------------------------
+// ADMIN — hantera publika ligor
+// ------------------------------------------------------------
+export type AdminLeagueInput = {
+  id?: string;
+  name: string;
+  description?: string;
+  prize?: string;
+  starts_on?: string | null;
+  ends_on?: string | null;
+};
+
+export async function adminSaveLeague(
+  input: AdminLeagueInput
+): Promise<{ ok: boolean; error?: string; id?: string }> {
+  try {
+    const { user } = await requireAdmin();
+    const admin = createAdminClient();
+    const name = (input.name ?? "").trim();
+    if (!name) return { ok: false, error: "Ange ett namn." };
+    if (input.starts_on && input.ends_on && input.ends_on < input.starts_on) {
+      return { ok: false, error: "Slutdatum kan inte vara före startdatum." };
+    }
+    const row = {
+      name,
+      type: "public" as const,
+      description: input.description?.trim() || null,
+      prize: input.prize?.trim() || null,
+      starts_on: input.starts_on || null,
+      ends_on: input.ends_on || null,
+    };
+    if (input.id) {
+      const { error } = await admin.from("leagues").update(row).eq("id", input.id);
+      if (error) return { ok: false, error: error.message };
+      revalidatePath("/ligor");
+      revalidatePath("/admin");
+      revalidatePath("/scoreboard");
+      return { ok: true, id: input.id };
+    }
+    const { data, error } = await admin
+      .from("leagues")
+      .insert({ ...row, owner_id: user.id })
+      .select("id")
+      .single();
+    if (error || !data) return { ok: false, error: error?.message ?? "Kunde inte skapa ligan." };
+    await admin.from("league_members").insert({ league_id: data.id, user_id: user.id });
+    revalidatePath("/ligor");
+    revalidatePath("/admin");
+    revalidatePath("/scoreboard");
+    return { ok: true, id: data.id };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+export async function adminDeleteLeague(id: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requireAdmin();
+    const admin = createAdminClient();
+    const { error } = await admin.from("leagues").delete().eq("id", id);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/ligor");
+    revalidatePath("/admin");
+    revalidatePath("/scoreboard");
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: String(e?.message ?? e) };

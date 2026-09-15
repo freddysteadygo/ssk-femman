@@ -21,9 +21,9 @@ export default async function LigorPage() {
 
   const { data: publicLeagues } = await sb
     .from("leagues")
-    .select("id, name, type")
+    .select("id, name, type, description, prize")
     .eq("type", "public")
-    .order("created_at", { ascending: false })
+    .order("created_at", { ascending: true })
     .limit(25);
 
   return (
@@ -61,13 +61,17 @@ export default async function LigorPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Publika ligor</h2>
         <div className="grid gap-2">
-          {(publicLeagues ?? []).map((l) => (
-            <div key={l.id} className="card flex items-center justify-between p-4">
-              <Link href={`/ligor/${l.id}`} className="font-medium hover:text-ssk-orange">
-                {l.name}
-              </Link>
+          {(publicLeagues ?? []).map((l: any) => (
+            <div key={l.id} className="card flex items-center justify-between gap-3 p-4">
+              <div className="min-w-0">
+                <Link href={`/ligor/${l.id}`} className="font-medium hover:text-ssk-blue">
+                  {l.name}
+                </Link>
+                {l.description && <p className="text-xs text-ssk-muted">{l.description}</p>}
+                {l.prize && <p className="text-xs font-semibold text-ssk-blue">🏆 {l.prize}</p>}
+              </div>
               {myLeagueIds.includes(l.id) ? (
-                <span className="label">Med</span>
+                <span className="label shrink-0">Med</span>
               ) : (
                 <PublicJoinButton leagueId={l.id} />
               )}

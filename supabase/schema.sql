@@ -172,6 +172,10 @@ create table if not exists leagues (
   type        league_type not null default 'private',
   owner_id    uuid not null references profiles(id) on delete cascade,
   join_code   text unique not null default upper(substr(encode(gen_random_bytes(6),'hex'),1,8)),
+  description text,
+  prize       text,
+  starts_on   date,   -- null = hela säsongen
+  ends_on     date,
   created_at  timestamptz not null default now()
 );
 create index if not exists leagues_type_idx on leagues(type);

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SettingsForm } from "@/components/SettingsForm";
@@ -14,7 +15,7 @@ export default async function InstallningarPage() {
 
   const { data: profile } = await sb
     .from("profiles")
-    .select("username, email, notify_round")
+    .select("username, email, notify_round, team_name")
     .eq("id", user.id)
     .single();
 
@@ -24,11 +25,21 @@ export default async function InstallningarPage() {
 
       <div className="card p-5">
         <p className="label">Inloggad som</p>
-        <p className="font-medium">{profile?.username}</p>
-        <p className="text-sm text-ssk-muted">{profile?.email}</p>
+        <p className="font-medium">{profile?.email}</p>
+        <p className="text-sm text-ssk-muted">Användarnamn: {profile?.username}</p>
       </div>
 
-      <SettingsForm initialNotify={profile?.notify_round ?? true} />
+      <SettingsForm
+        initialNotify={profile?.notify_round ?? true}
+        initialTeamName={profile?.team_name ?? ""}
+      />
+
+      <p className="text-center text-xs text-ssk-muted">
+        Så här hanterar vi dina uppgifter:{" "}
+        <Link href="/integritetspolicy" className="text-ssk-blue hover:underline">
+          Integritetspolicy
+        </Link>
+      </p>
     </div>
   );
 }
