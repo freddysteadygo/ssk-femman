@@ -46,7 +46,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <p className="mt-6 text-center text-xs text-white/50">
               SSK-femman · inofficiellt fanprojekt · data från stats.swehockey.se
             </p>
-            <p className="mt-2 text-center text-xs">
+            <p className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-xs">
+              <Link href="/om-projektet" className="text-white/60 hover:text-ssk-yellow hover:underline">
+                Om projektet
+              </Link>
+              <span className="text-white/30">·</span>
               <Link href="/integritetspolicy" className="text-white/60 hover:text-ssk-yellow hover:underline">
                 Integritetspolicy
               </Link>

@@ -29,3 +29,13 @@ body {
 .label {
   @apply text-sm text-ssk-muted;
 }
+.score-input {
+  @apply w-12 shrink-0 rounded-lg border border-ssk-line bg-white px-1 py-2 text-center text-base font-semibold tabular-nums text-ssk-ink focus:border-ssk-blue focus:outline-none disabled:opacity-60;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.score-input::-webkit-inner-spin-button,
+.score-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

@@ -260,11 +260,11 @@ export function FemmaPicker({
                 <div key={m.id} className="card grid items-center gap-3 p-3 sm:grid-cols-[1fr_auto]">
                   <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
                     <span className="min-w-0 flex-1 truncate text-right text-sm font-semibold">{home}</span>
-                    <input type="number" min={0} max={30} inputMode="numeric" className="input w-11 shrink-0 px-1 text-center" value={t.s}
+                    <input type="number" min={0} max={30} inputMode="numeric" className="score-input" value={t.s}
                       disabled={started}
                       onChange={(e) => setTips((c) => ({ ...c, [m.id]: { ...t, s: e.target.value } }))} />
                     <span className="shrink-0 text-ssk-muted">–</span>
-                    <input type="number" min={0} max={30} inputMode="numeric" className="input w-11 shrink-0 px-1 text-center" value={t.o}
+                    <input type="number" min={0} max={30} inputMode="numeric" className="score-input" value={t.o}
                       disabled={started}
                       onChange={(e) => setTips((c) => ({ ...c, [m.id]: { ...t, o: e.target.value } }))} />
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold">{away}</span>
