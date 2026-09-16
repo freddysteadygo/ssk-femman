@@ -228,20 +228,20 @@ export function FemmaPicker({
               });
               return (
                 <div key={m.id} className="card grid items-center gap-3 p-3 sm:grid-cols-[1fr_auto]">
-                  <div className="flex items-center gap-2">
-                    <span className="w-28 truncate text-right text-sm font-semibold sm:w-36">{home}</span>
-                    <input type="number" min={0} max={30} className="input w-12 text-center" value={t.s}
+                  <div className="flex min-w-0 items-center gap-1.5 sm:gap-2">
+                    <span className="min-w-0 flex-1 truncate text-right text-sm font-semibold">{home}</span>
+                    <input type="number" min={0} max={30} inputMode="numeric" className="input w-11 shrink-0 px-1 text-center" value={t.s}
                       disabled={started}
                       onChange={(e) => setTips((c) => ({ ...c, [m.id]: { ...t, s: e.target.value } }))} />
-                    <span className="text-ssk-muted">–</span>
-                    <input type="number" min={0} max={30} className="input w-12 text-center" value={t.o}
+                    <span className="shrink-0 text-ssk-muted">–</span>
+                    <input type="number" min={0} max={30} inputMode="numeric" className="input w-11 shrink-0 px-1 text-center" value={t.o}
                       disabled={started}
                       onChange={(e) => setTips((c) => ({ ...c, [m.id]: { ...t, o: e.target.value } }))} />
-                    <span className="w-28 truncate text-sm font-semibold sm:w-36">{away}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">{away}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3 sm:justify-end">
-                    <span className="text-sm text-ssk-muted">{when}</span>
-                    <button onClick={() => submitTip(m.id)} disabled={started || pending} className="btn-ghost text-sm">
+                    <span className="text-xs text-ssk-muted sm:text-sm">{when}</span>
+                    <button onClick={() => submitTip(m.id)} disabled={started || pending} className="btn-ghost shrink-0 text-sm">
                       Spara
                     </button>
                   </div>

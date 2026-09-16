@@ -173,7 +173,7 @@ export default async function Scoreboard({ showCta = true }: { showCta?: boolean
         <div className="card flex flex-col items-center gap-3 p-6 text-center">
           <p className="font-semibold">Vill du klättra på listan?</p>
           <p className="text-sm text-ssk-muted">Det är gratis och det är aldrig för sent att hoppa in.</p>
-          <Link href="/spela" className="btn-primary">Gör din femma</Link>
+          <Link href="/spela" className="btn-primary">Fixa din femma</Link>
         </div>
       )}
     </div>
