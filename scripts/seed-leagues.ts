@@ -32,7 +32,7 @@ async function main() {
 
   const leagues = [
     { name: "Hel säsong", description: "Hela grundserien — vecka 38 och framåt.", prize: "Äran", starts_on: null, ends_on: null },
-    { name: "SSK-femman #1 – Säsongsinledning", description: "Vecka 38–44.", prize: "Presentkort 500:- i sskshoppen.se", ...weekRange(2026, 38, 2026, 44) },
+    { name: "SSK-femman #1 – Säsongsstart", description: "Vecka 38–44.", prize: "Presentkort 500:- på sodertaljeskshop.se", ...weekRange(2026, 38, 2026, 44) },
     { name: "SSK-femman #2 – Julrush", description: "Vecka 45–51. Går att anmäla sig till redan nu.", prize: null, ...weekRange(2026, 45, 2026, 51) },
     { name: "SSK-femman #3 – Vinterland", description: "Vecka 52–3. Går att anmäla sig till redan nu.", prize: null, ...weekRange(2026, 52, 2027, 3) },
     { name: "SSK-femman #4 – Slutspurt", description: "Vecka 4–9.", prize: null, ...weekRange(2027, 4, 2027, 9) },

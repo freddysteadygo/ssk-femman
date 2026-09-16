@@ -8,10 +8,10 @@ export function NavBar({ isLoggedIn, isAdmin }: { isLoggedIn: boolean; isAdmin: 
   const close = () => setOpen(false);
 
   const links = [
-    { href: "/scoreboard", label: "Scoreboard" },
-    { href: "/regler", label: "Regler" },
     ...(isLoggedIn ? [{ href: "/spela", label: "Spela" }] : []),
     { href: "/ligor", label: "Ligor" },
+    { href: "/scoreboard", label: "Scoreboard" },
+    { href: "/regler", label: "Regler" },
     ...(isLoggedIn && isAdmin ? [{ href: "/admin", label: "Admin" }] : []),
     ...(isLoggedIn ? [{ href: "/installningar", label: "Inställningar" }] : []),
   ];

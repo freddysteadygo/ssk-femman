@@ -4,6 +4,15 @@ import { LeagueForms, PublicJoinButton } from "@/components/LeagueForms";
 
 export const dynamic = "force-dynamic";
 
+const REG_LEAD_DAYS = 28; // anmälan öppnar 4 veckor före start
+
+function regOpensAt(starts_on: string | null): Date | null {
+  if (!starts_on) return null;
+  const d = new Date(`${starts_on}T00:00:00`);
+  d.setDate(d.getDate() - REG_LEAD_DAYS);
+  return d;
+}
+
 export default async function LigorPage() {
   const sb = createClient();
   const {
@@ -21,10 +30,14 @@ export default async function LigorPage() {
 
   const { data: publicLeagues } = await sb
     .from("leagues")
-    .select("id, name, type, description, prize")
+    .select("id, name, type, description, prize, starts_on")
     .eq("type", "public")
     .order("created_at", { ascending: true })
-    .limit(25);
+    .order("name", { ascending: true })
+    .limit(50);
+
+  const now = new Date();
+  const fmt = (d: Date) => d.toLocaleDateString("sv-SE", { day: "numeric", month: "long" });
 
   return (
     <div className="space-y-8">
@@ -74,24 +87,40 @@ export default async function LigorPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Publika ligor</h2>
         <div className="grid gap-2">
-          {(publicLeagues ?? []).map((l: any) => (
-            <div key={l.id} className="card flex items-center justify-between gap-3 p-4">
-              <div className="min-w-0">
-                <Link href={`/ligor/${l.id}`} className="font-medium hover:text-ssk-blue">
-                  {l.name}
-                </Link>
-                {l.description && <p className="text-xs text-ssk-muted">{l.description}</p>}
-                {l.prize && <p className="text-xs font-semibold text-ssk-blue">🏆 {l.prize}</p>}
+          {(publicLeagues ?? []).map((l: any) => {
+            const opensAt = regOpensAt(l.starts_on);
+            const open = !opensAt || now >= opensAt;
+            const isMember = myLeagueIds.includes(l.id);
+            return (
+              <div
+                key={l.id}
+                className={`card flex items-center justify-between gap-3 p-4 ${!open && !isMember ? "opacity-60" : ""}`}
+              >
+                <div className="min-w-0">
+                  <Link href={`/ligor/${l.id}`} className="font-medium hover:text-ssk-blue">
+                    {l.name}
+                  </Link>
+                  {l.description && <p className="text-xs text-ssk-muted">{l.description}</p>}
+                  {l.prize && <p className="text-xs font-semibold text-ssk-blue">🏆 {l.prize}</p>}
+                </div>
+                <div className="shrink-0 text-right">
+                  {isMember ? (
+                    <span className="label">Med</span>
+                  ) : !open ? (
+                    <span className="text-xs text-ssk-muted">
+                      Anmälan öppnar
+                      <br />
+                      {opensAt ? fmt(opensAt) : ""}
+                    </span>
+                  ) : !user ? (
+                    <Link href="/login" className="btn-ghost text-sm">Gå med</Link>
+                  ) : (
+                    <PublicJoinButton leagueId={l.id} />
+                  )}
+                </div>
               </div>
-              {!user ? (
-                <Link href="/login" className="btn-ghost shrink-0 text-sm">Gå med</Link>
-              ) : myLeagueIds.includes(l.id) ? (
-                <span className="label shrink-0">Med</span>
-              ) : (
-                <PublicJoinButton leagueId={l.id} />
-              )}
-            </div>
-          ))}
+            );
+          })}
           {(publicLeagues ?? []).length === 0 && <p className="label">Inga publika ligor ännu.</p>}
         </div>
       </section>

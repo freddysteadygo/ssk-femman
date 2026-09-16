@@ -209,6 +209,14 @@ export async function joinLeague(joinCode: string): Promise<{ ok: boolean; error
 export async function joinPublicLeague(leagueId: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const { sb, user } = await requireUser();
+    // Anmälan öppnar 4 veckor före ligans start
+    const admin = createAdminClient();
+    const { data: league } = await admin.from("leagues").select("starts_on").eq("id", leagueId).maybeSingle();
+    if (league?.starts_on) {
+      const opens = new Date(`${league.starts_on}T00:00:00`);
+      opens.setDate(opens.getDate() - 28);
+      if (new Date() < opens) return { ok: false, error: "Anmälan har inte öppnat för den här ligan ännu." };
+    }
     const { error } = await sb.from("league_members").insert({ league_id: leagueId, user_id: user.id });
     if (error && !error.message.includes("duplicate")) return { ok: false, error: error.message };
     revalidatePath("/ligor");
