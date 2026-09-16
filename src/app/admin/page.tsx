@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { AdminMatchForm } from "@/components/AdminMatchForm";
 import { AdminLeagueForm } from "@/components/AdminLeagueForm";
 
@@ -16,21 +17,45 @@ export default async function AdminPage() {
     return <div className="card p-6">Kräver admin-behörighet.</div>;
   }
 
-  const [{ data: matches }, { data: players }, { data: leagues }] = await Promise.all([
-    sb.from("matches").select("*").order("starts_at", { ascending: false }).limit(40),
-    sb.from("players").select("*").eq("active", true).order("position").order("full_name"),
-    sb
-      .from("leagues")
-      .select("id, name, description, prize, starts_on, ends_on")
-      .eq("type", "public")
-      .order("starts_on", { ascending: true, nullsFirst: true }),
-  ]);
+  // Statistik via service-role (RLS-fritt) — bara admin ser den här sidan.
+  const admin = createAdminClient();
+  const [{ data: matches }, { data: players }, { data: leagues }, playerCount, entryCount, tipCount] =
+    await Promise.all([
+      sb.from("matches").select("*").order("starts_at", { ascending: false }).limit(40),
+      sb.from("players").select("*").eq("active", true).order("position").order("full_name"),
+      sb
+        .from("leagues")
+        .select("id, name, description, prize, starts_on, ends_on")
+        .eq("type", "public")
+        .order("starts_on", { ascending: true, nullsFirst: true }),
+      admin.from("profiles").select("*", { count: "exact", head: true }),
+      admin.from("entries").select("*", { count: "exact", head: true }),
+      admin.from("result_tips").select("*", { count: "exact", head: true }),
+    ]);
+
+  const stats = [
+    { label: "Registrerade spelare", value: playerCount.count ?? 0 },
+    { label: "Inlämnade femmor", value: entryCount.count ?? 0 },
+    { label: "Resultattips", value: tipCount.count ?? 0 },
+  ];
 
   return (
     <div className="space-y-10">
+      <section className="space-y-3">
+        <h1 className="text-2xl font-bold">Admin</h1>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {stats.map((s) => (
+            <div key={s.label} className="card p-4 text-center">
+              <div className="text-3xl font-extrabold text-ssk-blue">{s.value}</div>
+              <div className="label mt-1">{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="space-y-4">
         <div>
-          <h1 className="text-2xl font-bold">Admin — publika ligor</h1>
+          <h2 className="text-2xl font-bold">Publika ligor</h2>
           <p className="label mt-1">Skapa och redigera de publika ligorna som visas för alla spelare.</p>
         </div>
         <AdminLeagueForm leagues={leagues ?? []} />

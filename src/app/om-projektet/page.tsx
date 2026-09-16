@@ -26,14 +26,22 @@ export default function OmProjektetPage() {
           Poängen räknas automatiskt utifrån offentlig matchstatistik från stats.swehockey.se. Projektet
           har ingen koppling till Södertälje SK som förening.
         </p>
-        <div className="border-t border-ssk-line pt-4">
-          <p className="text-ssk-muted">Byggt av</p>
-          <p className="font-semibold">Freddy Karlsson · SteadyGo AB</p>
-          <p className="mt-1">
-            <a href="https://steadygo.se" target="_blank" rel="noopener noreferrer" className="text-ssk-blue hover:underline">steadygo.se</a>
-            {" · "}
-            <a href="mailto:hej@steadygo.se" className="text-ssk-blue hover:underline">hej@steadygo.se</a>
-          </p>
+        <div className="flex items-center gap-4 border-t border-ssk-line pt-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/freddy.png"
+            alt="Freddy Karlsson"
+            className="h-20 w-20 shrink-0 rounded-full border-2 border-ssk-yellow object-cover"
+          />
+          <div>
+            <p className="text-ssk-muted">Byggt av</p>
+            <p className="font-semibold">Freddy Karlsson · SteadyGo AB</p>
+            <p className="mt-1">
+              <a href="https://steadygo.se" target="_blank" rel="noopener noreferrer" className="text-ssk-blue hover:underline">steadygo.se</a>
+              {" · "}
+              <a href="mailto:hej@steadygo.se" className="text-ssk-blue hover:underline">hej@steadygo.se</a>
+            </p>
+          </div>
         </div>
       </div>
 

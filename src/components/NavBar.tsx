@@ -23,6 +23,12 @@ export function NavBar({ isLoggedIn, isAdmin }: { isLoggedIn: boolean; isAdmin: 
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/ssk-logo.svg" alt="SSK" className="h-7 w-7" />
           SSK-femman
+          <span
+            className="rounded bg-ssk-yellow px-1.5 py-0.5 text-[10px] font-extrabold uppercase leading-none tracking-wide text-ssk-navy"
+            title="Spelet är i beta — allt kanske inte fungerar 100 % än."
+          >
+            Beta
+          </span>
         </Link>
 
         {/* Desktop-meny */}
