@@ -135,6 +135,34 @@ export async function saveTip(
   }
 }
 
+export async function saveTips(
+  items: { matchId: string; predSsk: number; predOpp: number }[]
+): Promise<{ ok: boolean; error?: string; saved?: number }> {
+  try {
+    const { sb, user } = await requireUser();
+    if (!items.length) return { ok: false, error: "Inga tips att spara." };
+    const ids = items.map((i) => i.matchId);
+    const { data: matchRows } = await sb.from("matches").select("id, starts_at, status").in("id", ids);
+    const byId = new Map((matchRows ?? []).map((m: any) => [m.id, m]));
+    const now = new Date();
+    const rows = items
+      .filter((it) => {
+        const m = byId.get(it.matchId);
+        if (!m) return false;
+        if (new Date(m.starts_at) < now || m.status !== "upcoming") return false;
+        return it.predSsk >= 0 && it.predOpp >= 0 && it.predSsk <= 30 && it.predOpp <= 30;
+      })
+      .map((it) => ({ user_id: user.id, match_id: it.matchId, pred_ssk: it.predSsk, pred_opp: it.predOpp }));
+    if (!rows.length) return { ok: false, error: "Inga giltiga tips att spara (matcherna kan vara låsta)." };
+    const { error } = await sb.from("result_tips").upsert(rows, { onConflict: "user_id,match_id" });
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/spela");
+    return { ok: true, saved: rows.length };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
 // ------------------------------------------------------------
 // LIGOR
 // ------------------------------------------------------------

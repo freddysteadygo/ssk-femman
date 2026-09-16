@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import type { Match, Player, Round } from "@/lib/types";
-import { saveEntry, saveTip } from "@/lib/actions";
+import { saveEntry, saveTips } from "@/lib/actions";
 import { Jersey } from "./Jersey";
 import { SKATER_2526, GOALIE_2526 } from "@/lib/player-stats-2526";
 
@@ -65,6 +65,7 @@ export function FemmaPicker({
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [showAllTips, setShowAllTips] = useState(false);
+  const [tab, setTab] = useState<"femma" | "tips">("femma");
 
   // Gruppera tips-matcher per omgång (ISO-vecka); visa bara närmaste 3 som standard.
   const tipGroups = useMemo(() => {
@@ -102,16 +103,21 @@ export function FemmaPicker({
     });
   }
 
-  function submitTip(matchId: string) {
-    const t = tips[matchId];
-    if (!t || t.s === "" || t.o === "") {
-      setMsg("Fyll i båda siffrorna för tipset.");
+  const filledTipCount = Object.values(tips).filter((v) => v.s !== "" && v.o !== "").length;
+
+  function submitAllTips() {
+    const items = Object.entries(tips)
+      .filter(([, v]) => v.s !== "" && v.o !== "")
+      .map(([matchId, v]) => ({ matchId, predSsk: parseInt(v.s, 10), predOpp: parseInt(v.o, 10) }))
+      .filter((it) => Number.isFinite(it.predSsk) && Number.isFinite(it.predOpp));
+    if (!items.length) {
+      setMsg("Fyll i minst ett tips först.");
       return;
     }
     setMsg(null);
     startTransition(async () => {
-      const res = await saveTip(matchId, parseInt(t.s, 10), parseInt(t.o, 10));
-      setMsg(res.ok ? "Tips sparat! ✓" : res.error ?? "Något gick fel.");
+      const res = await saveTips(items);
+      setMsg(res.ok ? `Sparade ${res.saved} tips ✓` : res.error ?? "Något gick fel.");
     });
   }
 
@@ -140,7 +146,28 @@ export function FemmaPicker({
 
       {msg && <div className="card p-3 text-sm">{msg}</div>}
 
+      {/* Flikar */}
+      <div className="flex gap-1 rounded-lg border border-ssk-line bg-ssk-cream p-1 text-sm">
+        <button
+          onClick={() => setTab("femma")}
+          className={`flex-1 rounded-md px-3 py-2 font-medium transition-colors ${
+            tab === "femma" ? "bg-ssk-blue text-white" : "text-ssk-ink hover:bg-ssk-goldSoft"
+          }`}
+        >
+          Din femma
+        </button>
+        <button
+          onClick={() => setTab("tips")}
+          className={`flex-1 rounded-md px-3 py-2 font-medium transition-colors ${
+            tab === "tips" ? "bg-ssk-blue text-white" : "text-ssk-ink hover:bg-ssk-goldSoft"
+          }`}
+        >
+          Resultattips{filledTipCount > 0 ? ` (${filledTipCount})` : ""}
+        </button>
+      </div>
+
       {/* FEMMA: lista vänster, rink höger */}
+      {tab === "femma" && (
       <section>
         <div className="mb-4 flex items-center justify-between border-b border-ssk-line pb-2">
           <h2 className="text-lg font-semibold">Din femma</h2>
@@ -205,13 +232,16 @@ export function FemmaPicker({
           </div>
         </div>
       </section>
+      )}
 
       {/* RESULTATTIPS */}
+      {tab === "tips" && (
       <section className="space-y-3">
         <h2 className="border-b border-ssk-line pb-2 text-lg font-semibold">Resultattips</h2>
         <p className="label">
           Tippa resultatet efter <b>ordinarie tid</b> (60 min). Lika resultat = matchen går till
-          förlängning. Rätt utfall +2, exakt resultat +4.
+          förlängning. Rätt utfall +2, exakt resultat +4. Fyll i de matcher du vill och spara alla
+          på en gång med knappen längst ner.
         </p>
         {tipGroups.length === 0 && <p className="label">Inga kommande matcher.</p>}
 
@@ -241,9 +271,7 @@ export function FemmaPicker({
                   </div>
                   <div className="flex items-center justify-between gap-3 sm:justify-end">
                     <span className="text-xs text-ssk-muted sm:text-sm">{when}</span>
-                    <button onClick={() => submitTip(m.id)} disabled={started || pending} className="btn-ghost shrink-0 text-sm">
-                      Spara
-                    </button>
+                    {started && <span className="shrink-0 text-xs font-medium text-ssk-muted">Låst</span>}
                   </div>
                 </div>
               );
@@ -256,7 +284,20 @@ export function FemmaPicker({
             Visa fler omgångar ({tipGroups.length - 3} till)
           </button>
         )}
+
+        {tipGroups.length > 0 && (
+          <div className="sticky bottom-2 z-20 pt-2">
+            <button
+              onClick={submitAllTips}
+              disabled={pending || filledTipCount === 0}
+              className="btn-primary w-full shadow-lg"
+            >
+              {pending ? "Sparar…" : `Spara alla tips${filledTipCount > 0 ? ` (${filledTipCount})` : ""}`}
+            </button>
+          </div>
+        )}
       </section>
+      )}
     </div>
   );
 }
