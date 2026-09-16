@@ -40,7 +40,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="mx-auto max-w-5xl px-4 py-8">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/ssk-logo.svg" alt="Södertälje SK" className="mx-auto mb-6 h-12 w-12" />
-            <div className="text-center">
+
+            <p className="text-center text-xs text-white/50">
+              SSK-femman · inofficiellt fanprojekt · data från stats.swehockey.se
+            </p>
+            <p className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-xs">
+              <Link href="/om-projektet" className="text-white/60 hover:text-ssk-yellow hover:underline">
+                Om projektet
+              </Link>
+              <span className="text-white/30">·</span>
+              <Link href="/integritetspolicy" className="text-white/60 hover:text-ssk-yellow hover:underline">
+                Integritetspolicy
+              </Link>
+            </p>
+
+            <div className="mx-auto mt-8 max-w-md border-t border-white/10 pt-6 text-center">
               <p className="text-sm text-white/70">Utvecklad av</p>
               <p className="text-base font-semibold text-white">Freddy Karlsson · SteadyGo AB</p>
               <p className="mx-auto mt-1 max-w-md text-sm text-white/70">
@@ -55,18 +69,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </a>
               </div>
             </div>
-            <p className="mt-6 text-center text-xs text-white/50">
-              SSK-femman · inofficiellt fanprojekt · data från stats.swehockey.se
-            </p>
-            <p className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-xs">
-              <Link href="/om-projektet" className="text-white/60 hover:text-ssk-yellow hover:underline">
-                Om projektet
-              </Link>
-              <span className="text-white/30">·</span>
-              <Link href="/integritetspolicy" className="text-white/60 hover:text-ssk-yellow hover:underline">
-                Integritetspolicy
-              </Link>
-            </p>
           </div>
         </footer>
       </body>
