@@ -1,24 +1,16 @@
 name: Skrapa matchresultat
 
 # Pingar /api/cron/results så matchdata hämtas och poäng räknas flera gånger
-# per matchkväll (Vercel Hobby tillåter bara en cron-körning per dygn, därför
-# sköts den täta pollingen här istället — helt gratis).
-#
-# Endpointen är idempotent och skyddad med CRON_SECRET, så det är säkert att
-# köra ofta. Secreten skickas i Authorization-headern (aldrig i URL:en).
-#
-# KRÄVS: lägg till repo-secreten CRON_SECRET (Settings → Secrets and variables
-# → Actions) med SAMMA värde som CRON_SECRET-env-variabeln i Vercel.
+# per matchkväll (Vercel Hobby tillåter bara en cron-körning per dygn).
+# Endpointen är idempotent och skyddad med CRON_SECRET.
+# KRÄVS: repo-secreten CRON_SECRET med SAMMA värde som i Vercel.
 
 on:
   schedule:
-    # Var 30:e minut mellan 14:00 och 22:59 UTC ≈ 15–24 svensk tid.
-    # Täcker både helgeftermiddagar och vardagskvällar (under + efter match).
+    # Var 30:e minut 14:00-22:59 UTC (ca 15-24 svensk tid).
     - cron: "*/30 14-22 * * *"
-  # Gör att du kan köra den manuellt när som helst från Actions-fliken.
   workflow_dispatch: {}
 
-# Undvik överlappande körningar om en tar ovanligt lång tid.
 concurrency:
   group: scrape-results
   cancel-in-progress: false
@@ -32,12 +24,10 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           if [ -z "$CRON_SECRET" ]; then
-            echo "::error::Repo-secreten CRON_SECRET saknas. Lägg till den under Settings → Secrets and variables → Actions."
+            echo "::error::Repo-secreten CRON_SECRET saknas."
             exit 1
           fi
-          code=$(curl -sS --location-trusted --max-time 120 -o /tmp/out.txt -w "%{http_code}" \
-  -H "Authorization: Bearer $CRON_SECRET" \
-  "https://www.sskfemman.se/api/cron/results")
+          code=$(curl -sS --location-trusted --max-time 120 -o /tmp/out.txt -w "%{http_code}" -H "Authorization: Bearer $CRON_SECRET" "https://www.sskfemman.se/api/cron/results")
           echo "HTTP $code"
           cat /tmp/out.txt
           echo ""
