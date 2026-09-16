@@ -7,8 +7,9 @@ name: Skrapa matchresultat
 
 on:
   schedule:
-    # Var 30:e minut 14:00-22:59 UTC (ca 15-24 svensk tid).
-    - cron: "*/30 14-22 * * *"
+    # Var 30:e minut 11:00-22:59 UTC (ca 13-00:30 svensk tid) - tacker
+    # helgeftermiddagar (14:00) och kvallsmatcher, fore avspark till efter slut.
+    - cron: "*/30 11-22 * * *"
   workflow_dispatch: {}
 
 concurrency:
