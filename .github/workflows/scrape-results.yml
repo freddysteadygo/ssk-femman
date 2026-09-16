@@ -35,7 +35,7 @@ jobs:
             echo "::error::Repo-secreten CRON_SECRET saknas. Lägg till den under Settings → Secrets and variables → Actions."
             exit 1
           fi
-         code=$(curl -sS --location-trusted --max-time 120 -o /tmp/out.txt -w "%{http_code}" \
+          code=$(curl -sS --location-trusted --max-time 120 -o /tmp/out.txt -w "%{http_code}" \
   -H "Authorization: Bearer $CRON_SECRET" \
   "https://www.sskfemman.se/api/cron/results")
           echo "HTTP $code"

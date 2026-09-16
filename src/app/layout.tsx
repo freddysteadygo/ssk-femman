@@ -4,7 +4,7 @@ import "./globals.css";
 import { Nav } from "@/components/Nav";
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://sskfemman.se"),
+  metadataBase: new URL("https://www.sskfemman.se"),
   title: {
     default: "SSK-femman – fantasyspel för Södertälje SK",
     template: "%s · SSK-femman",
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "sv_SE",
-    url: "https://sskfemman.se",
+    url: "https://www.sskfemman.se",
     siteName: "SSK-femman",
     title: "SSK-femman – fantasyspel för Södertälje SK",
     description:
