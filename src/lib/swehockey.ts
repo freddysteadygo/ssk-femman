@@ -2,14 +2,19 @@
 // SSK-femman — swehockey-scraper
 // ------------------------------------------------------------
 // stats.swehockey.se har ingen öppen API → vi parsar serverrenderad HTML.
-// Sidan är tabelltung; strategin här är:
-//   1) hämta HTML,
-//   2) extrahera ALLA tabeller som text-matriser (robust mot små ändringar),
-//   3) tolka matriserna med tolerant text-matchning i högnivåfunktionerna.
 //
-// ⚠️  VERIFIERA MOT LIVE-HTML: selektorer/kolumnordning kan skilja per vy.
-//     Kör scripts/inspect-game.ts mot en riktig match och justera vid behov.
-//     Admin-panelen (manuell inmatning) fungerar oavsett scrapern.
+// Schema  (/ScheduleAndResults/Schedule/{seasonId}) → getSskSchedule()
+// Rapport (/Game/Events/{gameId})                    → getGameSummary()
+//
+// Matchrapporten lägger ALLT i EN kronologisk händelselogg + en
+// målvaktssammanfattning, i samma tabell. Varje rad är:
+//   [tid, "h-a (situation)" | "N min" | "GK Out", lag, "nr. Namn (…)", detalj]
+// Målvaktsrad: [ , , lag, "nr. Namn", "94,74% (30/31)"]
+// Parsern nedan är verifierad mot en riktig färdigspelad match
+// (BIK Karlskoga–Södertälje SK, game 1113890: 1–2, 3 mål, 9 utv).
+//
+// OBS: den här vyn exponerar inte "spelare på isen" för +/-, så plus_minus
+// lämnas 0 från autoskrapningen. Admin-panelen kan komplettera vid behov.
 // ============================================================
 
 import * as cheerio from "cheerio";
@@ -29,15 +34,12 @@ export interface ScheduledMatch {
 }
 
 export interface ScrapedGoalEvent {
-  team: string; // rå lagsträng ur rapporten
+  team: string; // rå lagsträng ur rapporten (t.ex. "SSK")
   scorer: string;
   assists: string[];
   situation: "EQ" | "PP" | "SH" | "PS" | "EN" | "UNKNOWN";
   time: string;
-  // Tröjnummer för spelare på isen (för +/-). swehockey-rapporten anger
-  // "Pos. Part." (målgörande lagets spelare på isen) och "Neg. Part."
-  // (det insläppande lagets spelare på isen).
-  posPart: number[];
+  posPart: number[]; // ej tillgängligt i denna vy → tom
   negPart: number[];
 }
 
@@ -64,7 +66,7 @@ export interface GameSummary {
   goals: ScrapedGoalEvent[];
   penalties: ScrapedPenalty[];
   goalies: { home: ScrapedGoalie[]; away: ScrapedGoalie[] };
-  overtime: boolean; // avgjord på förlängning/straffar (bäst-gissning — verifiera/justera i admin)
+  overtime: boolean;
 }
 
 // ------------------------------------------------------------
@@ -74,7 +76,6 @@ export async function fetchHtml(path: string): Promise<string> {
   const url = path.startsWith("http") ? path : `${BASE}${path}`;
   const res = await fetch(url, {
     headers: { "User-Agent": UA, "Accept-Language": "sv,en" },
-    // Var snäll mot servern: cachas en stund på plattformsnivå om möjligt
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`swehockey ${res.status} för ${url}`);
@@ -116,10 +117,6 @@ function toInt(s: string | undefined): number | null {
 // ------------------------------------------------------------
 // SCHEMA  (/ScheduleAndResults/Schedule/{seasonId})
 // ------------------------------------------------------------
-/**
- * Returnerar SSK:s matcher ur en säsongs schema-sida.
- * Vi filtrerar rader som nämner Södertälje.
- */
 export async function getSskSchedule(
   seasonId: string,
   teamName = "Södertälje"
@@ -128,9 +125,7 @@ export async function getSskSchedule(
   const $ = cheerio.load(html);
   const out: ScheduledMatch[] = [];
 
-  // VIKTIGT: swehockey skriver bara ut datumet på dagens FÖRSTA match.
-  // Resten av dagens matcher har tom datumcell — så vi bär med senaste datum
-  // radvis medan vi går igenom ALLA rader (inte bara SSK-raderna).
+  // swehockey skriver bara ut datumet på dagens FÖRSTA match → bär med senaste.
   let currentDate = "";
 
   $("tr").each((_, tr) => {
@@ -141,11 +136,9 @@ export async function getSskSchedule(
       .get();
     if (!cells.length) return;
 
-    // Uppdatera datum om raden innehåller ett
     const dateInRow = cells.map((c) => (c.match(/\d{4}-\d{2}-\d{2}/) || [])[0]).find(Boolean);
     if (dateInRow) currentDate = dateInRow;
 
-    // Bara SSK-matcher
     if (!cells.some((c) => c.toLowerCase().includes(teamName.toLowerCase()))) return;
     const matchCell = cells.find(
       (c) => c.includes(" - ") && c.toLowerCase().includes(teamName.toLowerCase())
@@ -174,14 +167,12 @@ function parseScheduleRow(
   const isHome = homeRaw.toLowerCase().includes(teamName.toLowerCase());
   const opponent = isHome ? awayRaw : homeRaw;
 
-  // Tid: egen tidscell, annars första tiden i någon cell
   const timeCell =
     cells.find((c) => /^\d{1,2}[:.]\d{2}$/.test(c)) ||
     (cells.map((c) => (c.match(/\b\d{1,2}[:.]\d{2}\b/) || [])[0]).find(Boolean) ?? "");
   const date = clean(`${currentDate} ${timeCell}`);
-  if (!currentDate) return null; // utan datum kan vi inte placera matchen
+  if (!currentDate) return null;
 
-  // Resultat: egen cell "x - y" med 1–2-siffriga tal (inte år/datum)
   const isScoreCell = (c: string) =>
     !/\d{4}/.test(c) && /^\s*\d{1,2}\s*[-–]\s*\d{1,2}\b/.test(c);
   const scoreCell = cells.find(isScoreCell);
@@ -203,7 +194,6 @@ function parseScheduleRow(
 }
 
 function dedupeByGameId(arr: ScheduledMatch[]): ScheduledMatch[] {
-  // En rad per unik match: datum (utan tid) + motståndare + hemma/borta.
   const seen = new Set<string>();
   const out: ScheduledMatch[] = [];
   for (const m of arr) {
@@ -226,53 +216,111 @@ export async function getGameSummary(gameId: string): Promise<GameSummary> {
 
 export function parseGameSummary(gameId: string, html: string): GameSummary {
   const $ = cheerio.load(html);
-  const headerText = clean($("h1, .gameinfo, .teamheader").first().text() || $("title").text());
 
-  // Lag + slutresultat ur rubriken, t.ex. "Lag A - Lag B 3 - 2"
-  const { homeTeam, awayTeam, homeGoals, awayGoals } = parseHeader(headerText, $);
+  // Slutresultat + lag ur sidtiteln: "Hemma - Borta (h-a)"
+  const title = clean($("title").text());
+  const scoreM = title.match(/\((\d+)\s*-\s*(\d+)\)/);
+  const homeGoals = scoreM ? parseInt(scoreM[1], 10) : null;
+  const awayGoals = scoreM ? parseInt(scoreM[2], 10) : null;
+  const teamsM = title.match(/^\s*(.+?)\s*-\s*(.+?)\s*\(/);
+  const homeTeam = teamsM ? clean(teamsM[1]) : "Hemmalag";
+  const awayTeam = teamsM ? clean(teamsM[2]) : "Bortalag";
+  const homeCode = (homeTeam.split(/\s+/)[0] || "").toLowerCase();
+
+  // Hitta händelseloggen: den "leaf"-tabell (utan nästlad tabell) vars text
+  // innehåller matchtider och mål-/utvisningsmarkörer.
+  let eventRows: string[][] | null = null;
+  $("table").each((_, t) => {
+    if (eventRows) return;
+    if ($(t).find("table").length) return;
+    const rows: string[][] = [];
+    $(t)
+      .find("tr")
+      .each((__, tr) => {
+        const cells = $(tr)
+          .find("th,td")
+          .map((___, td) => clean($(td).text()))
+          .get();
+        if (cells.length) rows.push(cells);
+      });
+    const flat = rows.flat().join(" ");
+    if (/\d{1,2}:\d{2}/.test(flat) && /\(EQ\)|\(PP\)|\(SH\)| min/i.test(flat)) {
+      eventRows = rows;
+    }
+  });
 
   const goals: ScrapedGoalEvent[] = [];
   const penalties: ScrapedPenalty[] = [];
   const goaliesHome: ScrapedGoalie[] = [];
   const goaliesAway: ScrapedGoalie[] = [];
 
-  const tables = extractTables(html);
-  for (const rows of tables) {
-    const flat = rows.flat().join(" | ").toLowerCase();
+  for (const r of eventRows ?? []) {
+    if (r.length < 3) continue;
+    const c0 = r[0] ?? "";
+    const c1 = r[1] ?? "";
+    const team = r[2] ?? "";
+    const c3 = r[3] ?? "";
 
-    // MÅL-tabell: innehåller ofta "målskytt"/"assist" eller situationskoder
-    if (flat.includes("mål") || flat.includes("goal") || /pp1|sh1|\b5-4\b|\b4-5\b/.test(flat)) {
-      for (const r of rows) {
-        const g = parseGoalRow(r);
-        if (g) goals.push(g);
-      }
+    // Målvaktsrad: sista cellen "86,67% (13/15)"
+    const gk = (r[4] ?? "").match(/(\d{1,3},\d{1,2})%\s*\((\d+)\/(\d+)\)/);
+    if (gk) {
+      const saves = parseInt(gk[2], 10);
+      const shots = parseInt(gk[3], 10);
+      const first = splitPlayers(c3)[0];
+      const entry: ScrapedGoalie = {
+        name: first ? first.name : c3,
+        saves,
+        shotsAgainst: shots,
+        goalsAgainst: shots - saves,
+        savePct: parseFloat(gk[1].replace(",", ".")),
+      };
+      (team.toLowerCase().startsWith(homeCode) && homeCode ? goaliesHome : goaliesAway).push(entry);
+      continue;
     }
 
-    // UTVISNINGAR
-    if (flat.includes("utvisning") || flat.includes("penalt")) {
-      for (const r of rows) {
-        const p = parsePenaltyRow(r);
-        if (p) penalties.push(p);
+    if (!/^\d{1,2}:\d{2}$/.test(c0)) continue;
+
+    // Målrad: c1 = "1-2 (EQ)" / "1-2 (PP1)" / "1-2 (SH)" ...
+    const goalM = c1.match(/^(\d+)\s*-\s*(\d+)\s*(?:\(([A-Za-z0-9]+)\))?/);
+    if (goalM && !/min/i.test(c1)) {
+      const players = splitPlayers(c3);
+      if (players.length) {
+        const sit = (goalM[3] || "EQ").toUpperCase();
+        const situation: ScrapedGoalEvent["situation"] = sit.startsWith("PP")
+          ? "PP"
+          : sit.startsWith("SH")
+          ? "SH"
+          : sit === "PS"
+          ? "PS"
+          : sit === "EN"
+          ? "EN"
+          : "EQ";
+        goals.push({
+          team,
+          scorer: players[0].name,
+          assists: players.slice(1, 3).map((p) => p.name),
+          situation,
+          time: c0,
+          posPart: [],
+          negPart: [],
+        });
       }
+      continue;
     }
 
-    // MÅLVAKTER: rad med räddningsprocent (t.ex. "94,74") + skott
-    if (flat.includes("målvakt") || flat.includes("goalkeeper") || /\d{2},\d{2}\s*%/.test(flat)) {
-      for (const r of rows) {
-        const gk = parseGoalieRow(r);
-        if (gk) {
-          // hemma/borta-tilldelning görs grovt: matcha lagnamn i raden
-          const rowText = r.join(" ").toLowerCase();
-          if (rowText.includes(homeTeam.toLowerCase().split(" ")[0])) goaliesHome.push(gk);
-          else if (rowText.includes(awayTeam.toLowerCase().split(" ")[0])) goaliesAway.push(gk);
-          else goaliesHome.push(gk); // fallback
-        }
-      }
+    // Utvisningsrad: c1 = "2 min" / "5 min" / "10 min"
+    const pen = c1.match(/^(\d+)\s*min/i);
+    if (pen) {
+      const first = splitPlayers(c3)[0];
+      penalties.push({ team, player: first ? first.name : c3, minutes: parseInt(pen[1], 10) });
+      continue;
     }
   }
 
-  // Bäst-gissning om matchen avgjordes på förlängning/straffar.
-  const overtime = /\bgws\b|straffl[aä]ggning|straffar|sudden\s*death|efter\s*f[öo]rl[äa]ng|\bövertid\b|\bo\.?t\.?\b/i.test(html);
+  const overtime =
+    /\bgws\b|game\s*winning\s*shots|straffl[aä]ggning|sudden\s*death|efter\s*f[öo]rl[äa]ng|\bövertid\b/i.test(
+      html
+    );
 
   return {
     gameId,
@@ -287,117 +335,23 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
   };
 }
 
-function parseHeader(
-  headerText: string,
-  $: cheerio.CheerioAPI
-): { homeTeam: string; awayTeam: string; homeGoals: number | null; awayGoals: number | null } {
-  // Försök 1: "Lag A - Lag B 3 - 2"
-  let m = headerText.match(/(.+?)\s*-\s*(.+?)\s+(\d+)\s*-\s*(\d+)/);
-  if (m) {
-    return {
-      homeTeam: clean(m[1]),
-      awayTeam: clean(m[2]),
-      homeGoals: parseInt(m[3], 10),
-      awayGoals: parseInt(m[4], 10),
-    };
-  }
-  // Försök 2: bara "Lag A - Lag B"
-  m = headerText.match(/(.+?)\s*-\s*(.+)/);
-  return {
-    homeTeam: m ? clean(m[1]) : "Hemmalag",
-    awayTeam: m ? clean(m[2]) : "Bortalag",
-    homeGoals: null,
-    awayGoals: null,
-  };
-}
-
-function parseGoalRow(cells: string[]): ScrapedGoalEvent | null {
-  const joined = cells.join(" ");
-  // En målrad har typiskt en tid (mm:ss) och en spelarnamn med komma
-  if (!/\d{1,2}:\d{2}/.test(joined)) return null;
-  const nameCell = cells.find((c) => /[A-Za-zÅÄÖåäö]+,\s*[A-Za-zÅÄÖåäö]/.test(c));
-  if (!nameCell) return null;
-
-  const time = (joined.match(/\d{1,2}:\d{2}/) || [""])[0];
-  const situation = detectSituation(joined);
-
-  // scorer = första namnet, assists = ev. fler namn i samma cell/efterföljande celler
-  const names = cells
-    .join(" ; ")
-    .split(/;|\(|\)/)
+/**
+ * Delar en spelarsträng till {nr, namn}.
+ * "88. Holst, Filip (1) 91. Vanderbeck, Andrew 19. Muzito Bagenda, Daniel"
+ * → scorer först, resten assist. swehockey klistrar ibland ihop
+ *   "Namn19. Nästa" utan mellanslag → vi normaliserar det först.
+ */
+function splitPlayers(str: string): { no: number; name: string }[] {
+  const norm = str.replace(/([A-Za-zÅÄÖåäö)])(\d{1,3}\.)/g, "$1 $2");
+  return norm
+    .split(/\s(?=\d{1,3}\.\s)/)
     .map((s) => s.trim())
-    .filter((s) => /[A-Za-zÅÄÖåäö]+,\s*[A-Za-zÅÄÖåäö]/.test(s));
-
-  const scorer = names[0];
-  const assists = names.slice(1).slice(0, 2);
-
-  return {
-    team: cells[0] || "",
-    scorer,
-    assists,
-    situation,
-    time,
-    posPart: parseJerseyList(joined, /pos\.?\s*part\.?:?\s*([\d,\s]+?)(?:neg|$)/i),
-    negPart: parseJerseyList(joined, /neg\.?\s*part\.?:?\s*([\d,\s]+)/i),
-  };
-}
-
-/** Plockar ut tröjnummer ur t.ex. "Pos. Part.: 6, 18, 20, 82". */
-function parseJerseyList(text: string, re: RegExp): number[] {
-  const m = text.match(re);
-  if (!m) return [];
-  return m[1]
-    .split(/[,\s]+/)
-    .map((x) => parseInt(x, 10))
-    .filter((n) => !isNaN(n) && n > 0 && n < 100);
-}
-
-function detectSituation(s: string): ScrapedGoalEvent["situation"] {
-  const t = s.toLowerCase();
-  if (/pp\d|5-4|5-3|4-3|powerplay/.test(t)) return "PP";
-  if (/sh\d|4-5|3-5|shorthand/.test(t)) return "SH";
-  if (/ps\b|straff/.test(t)) return "PS";
-  if (/en\b|empty/.test(t)) return "EN";
-  if (/5-5|even/.test(t)) return "EQ";
-  return "UNKNOWN";
-}
-
-function parsePenaltyRow(cells: string[]): ScrapedPenalty | null {
-  const joined = cells.join(" ");
-  const nameCell = cells.find((c) => /[A-Za-zÅÄÖåäö]+,\s*[A-Za-zÅÄÖåäö]/.test(c));
-  const minMatch = joined.match(/\b(\d+)\s*min\b/i) || joined.match(/\b(2|4|5|10)\b/);
-  if (!nameCell || !minMatch) return null;
-  return {
-    team: cells[0] || "",
-    player: nameCell,
-    minutes: parseInt(minMatch[1], 10),
-  };
-}
-
-function parseGoalieRow(cells: string[]): ScrapedGoalie | null {
-  const joined = cells.join(" ");
-  const nameCell = cells.find((c) => /[A-Za-zÅÄÖåäö]+,\s*[A-Za-zÅÄÖåäö]/.test(c));
-  if (!nameCell) return null;
-  // Räddningsprocent finns ofta som "94,74"
-  const pctMatch = joined.match(/(\d{1,3},\d{1,2})\s*%?/);
-  // "36 saves on 38 shots" eller "36/38"
-  const savesShots =
-    joined.match(/(\d+)\s*(?:\/|of|on|av)\s*(\d+)/i) || null;
-  let saves = 0;
-  let shots = 0;
-  if (savesShots) {
-    saves = parseInt(savesShots[1], 10);
-    shots = parseInt(savesShots[2], 10);
-  }
-  if (!savesShots && !pctMatch) return null;
-  const goalsAgainst = shots && saves ? shots - saves : 0;
-  return {
-    name: nameCell,
-    saves,
-    shotsAgainst: shots,
-    goalsAgainst,
-    savePct: pctMatch ? parseFloat(pctMatch[1].replace(",", ".")) : null,
-  };
+    .filter(Boolean)
+    .map((p) => {
+      const m = p.match(/^(\d{1,3})\.\s*(.+?)(?:\s*\(\d+\))?\s*$/);
+      return m ? { no: parseInt(m[1], 10), name: clean(m[2]) } : null;
+    })
+    .filter((x): x is { no: number; name: string } => !!x);
 }
 
 // ------------------------------------------------------------
