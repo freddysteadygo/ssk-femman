@@ -16,6 +16,9 @@ import { scoreSkater, scoreGoalie, scoreTip, regulationScore } from "./scoring";
 
 type Sb = ReturnType<typeof createAdminClient>;
 
+// Hur långt före första matchen omgången låses (minuter).
+const LOCK_MINUTES_BEFORE = 30;
+
 // ISO-vecka → rundnyckel (spelenhet = kalendervecka mån–sön)
 function isoWeek(d: Date): { year: number; week: number } {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -70,7 +73,11 @@ export async function syncSchedule(): Promise<{ rounds: number; matches: number 
       .map((f) => parseDate(f.date))
       .filter((x): x is Date => !!x)
       .sort((a, b) => a.getTime() - b.getTime());
-    const deadline = starts[0]?.toISOString() ?? new Date().toISOString();
+    // Spelet låser LOCK_MINUTES_BEFORE minuter före första matchens start.
+    const first = starts[0];
+    const deadline = first
+      ? new Date(first.getTime() - LOCK_MINUTES_BEFORE * 60_000).toISOString()
+      : new Date().toISOString();
 
     const { data: round } = await sb
       .from("rounds")

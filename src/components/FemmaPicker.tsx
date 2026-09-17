@@ -134,7 +134,7 @@ export function FemmaPicker({
         <div>
           <h1 className="text-2xl font-bold">{round.name ?? `Omgång ${round.number}`}</h1>
           <p className="label">
-            Deadline: {deadline.toLocaleString("sv-SE", { dateStyle: "medium", timeStyle: "short" })}
+            Deadline: {deadline.toLocaleString("sv-SE", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Stockholm" })}
           </p>
         </div>
         {locked && (
@@ -255,6 +255,7 @@ export function FemmaPicker({
               const away = m.is_home ? m.opponent : "SSK";
               const when = new Date(m.starts_at).toLocaleString("sv-SE", {
                 weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                timeZone: "Europe/Stockholm",
               });
               return (
                 <div key={m.id} className="card grid items-center gap-3 p-3 sm:grid-cols-[1fr_auto]">

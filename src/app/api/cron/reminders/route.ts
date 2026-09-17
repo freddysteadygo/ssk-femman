@@ -33,7 +33,11 @@ export async function GET(req: NextRequest) {
       .eq("notify_round", true)
       .not("email", "is", null);
 
-    const deadline = new Date(r.deadline).toLocaleString("sv-SE", { dateStyle: "full", timeStyle: "short" });
+    const deadline = new Date(r.deadline).toLocaleString("sv-SE", {
+      dateStyle: "full",
+      timeStyle: "short",
+      timeZone: "Europe/Stockholm",
+    });
     const title = r.name ?? `Omgång ${r.number}`;
     const subject = `Dags att spela: ${title}`;
     const html = `
