@@ -10,6 +10,7 @@ export function NavBar({ isLoggedIn, isAdmin }: { isLoggedIn: boolean; isAdmin: 
   const links = [
     ...(isLoggedIn ? [{ href: "/spela", label: "Spela" }] : []),
     { href: "/ligor", label: "Ligor" },
+    { href: "/slutspel", label: "Slutspel" },
     { href: "/scoreboard", label: "Scoreboard" },
     { href: "/regler", label: "Regler" },
     ...(isLoggedIn && isAdmin ? [{ href: "/admin", label: "Admin" }] : []),

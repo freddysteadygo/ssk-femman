@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AdminMatchForm } from "@/components/AdminMatchForm";
 import { AdminLeagueForm } from "@/components/AdminLeagueForm";
+import { PlayoffAdmin } from "@/components/PlayoffAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,18 @@ export default async function AdminPage() {
       admin.from("result_tips").select("*", { count: "exact", head: true }),
     ]);
 
+  const [{ data: playoffLeagues }, { data: gwRounds }] = await Promise.all([
+    admin
+      .from("playoff_leagues")
+      .select("id, name, size, status, current_round, total_rounds")
+      .order("created_at", { ascending: false }),
+    admin.from("rounds").select("id, number, name").order("number", { ascending: true }),
+  ]);
+  const gameweeks = (gwRounds ?? []).map((r: any) => ({
+    id: r.id,
+    label: r.name || `Omgång ${r.number}`,
+  }));
+
   const stats = [
     { label: "Registrerade spelare", value: playerCount.count ?? 0 },
     { label: "Inlämnade femmor", value: entryCount.count ?? 0 },
@@ -59,6 +72,17 @@ export default async function AdminPage() {
           <p className="label mt-1">Skapa och redigera de publika ligorna som visas för alla spelare.</p>
         </div>
         <AdminLeagueForm leagues={leagues ?? []} />
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-2xl font-bold">Slutspelsligor</h2>
+          <p className="label mt-1">
+            Skapa utslagsträd, starta när anmälan är klar, koppla varje omgång till en speleomgång och
+            avgör den.
+          </p>
+        </div>
+        <PlayoffAdmin leagues={playoffLeagues ?? []} gameweeks={gameweeks} />
       </section>
 
       <section className="space-y-4">

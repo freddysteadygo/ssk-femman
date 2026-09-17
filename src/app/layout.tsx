@@ -54,13 +54,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </Link>
             </p>
 
-            <div className="mx-auto mt-8 max-w-md border-t border-white/10 pt-6 text-center">
-              <p className="text-sm text-white/70">Utvecklad av</p>
-              <p className="text-base font-semibold text-white">Freddy Karlsson · SteadyGo AB</p>
-              <p className="mx-auto mt-1 max-w-md text-sm text-white/70">
+            <div className="mx-auto mt-6 max-w-sm border-t border-white/10 pt-5 text-center text-xs">
+              <p className="text-white/60">Utvecklad av</p>
+              <p className="text-[13px] font-semibold text-white">Freddy Karlsson · SteadyGo AB</p>
+              <p className="mx-auto mt-1 max-w-xs text-white/55">
                 Digital marknadsföring &amp; skräddarsydda webbverktyg. Vill du ha något liknande byggt?
               </p>
-              <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm">
+              <div className="mt-1.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
                 <a href="https://steadygo.se" target="_blank" rel="noopener noreferrer" className="font-medium text-ssk-yellow hover:underline">
                   steadygo.se
                 </a>

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "./supabase/server";
 import { createAdminClient } from "./supabase/admin";
 import { recomputeRound } from "./ingest";
+import { startPlayoff, settleCurrentRound } from "./playoff";
 import { scoreSkater, scoreTip, regulationScore } from "./scoring";
 import type { AdminSkaterLine, AdminGoalieLine } from "./types";
 
@@ -390,6 +391,148 @@ export async function adminSaveMatch(
     if (match.round_id) await recomputeRound(admin, match.round_id);
     revalidatePath("/admin");
     revalidatePath("/spela");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+// ------------------------------------------------------------
+// SLUTSPELSLIGOR (H2H-utslagsträd)
+// ------------------------------------------------------------
+export async function adminCreatePlayoff(
+  name: string,
+  size: number
+): Promise<{ ok: boolean; error?: string; id?: string }> {
+  try {
+    const { user } = await requireAdmin();
+    const admin = createAdminClient();
+    const nm = (name ?? "").trim();
+    if (!nm) return { ok: false, error: "Ange ett namn." };
+    if (![2, 4, 8, 16, 32].includes(size)) {
+      return { ok: false, error: "Antal deltagare måste vara 2, 4, 8, 16 eller 32." };
+    }
+    const { data, error } = await admin
+      .from("playoff_leagues")
+      .insert({ name: nm, size, owner_id: user.id, status: "open" })
+      .select("id")
+      .single();
+    if (error || !data) return { ok: false, error: error?.message ?? "Kunde inte skapa." };
+    revalidatePath("/slutspel");
+    revalidatePath("/admin");
+    return { ok: true, id: data.id };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+export async function joinPlayoff(leagueId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { sb, user } = await requireUser();
+    const admin = createAdminClient();
+    const { data: league } = await admin
+      .from("playoff_leagues")
+      .select("size, status")
+      .eq("id", leagueId)
+      .maybeSingle();
+    if (!league) return { ok: false, error: "Slutspelsligan finns inte." };
+    if (league.status !== "open") return { ok: false, error: "Anmälan är stängd — slutspelet har startat." };
+    const { data: mine } = await admin
+      .from("playoff_participants")
+      .select("user_id")
+      .eq("league_id", leagueId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (!mine) {
+      const { count } = await admin
+        .from("playoff_participants")
+        .select("*", { count: "exact", head: true })
+        .eq("league_id", leagueId);
+      if ((count ?? 0) >= league.size) return { ok: false, error: "Slutspelsligan är full." };
+    }
+    const { error } = await sb.from("playoff_participants").insert({ league_id: leagueId, user_id: user.id });
+    if (error && !error.message.includes("duplicate")) return { ok: false, error: error.message };
+    revalidatePath("/slutspel");
+    revalidatePath(`/slutspel/${leagueId}`);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+export async function leavePlayoff(leagueId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { sb, user } = await requireUser();
+    const admin = createAdminClient();
+    const { data: league } = await admin.from("playoff_leagues").select("status").eq("id", leagueId).maybeSingle();
+    if (league?.status !== "open") return { ok: false, error: "Går inte att lämna efter start." };
+    await sb.from("playoff_participants").delete().eq("league_id", leagueId).eq("user_id", user.id);
+    revalidatePath("/slutspel");
+    revalidatePath(`/slutspel/${leagueId}`);
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+export async function adminStartPlayoff(leagueId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requireAdmin();
+    const admin = createAdminClient();
+    await startPlayoff(admin, leagueId);
+    revalidatePath("/slutspel");
+    revalidatePath(`/slutspel/${leagueId}`);
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+export async function adminSetPlayoffRoundGw(
+  leagueId: string,
+  round: number,
+  gwRoundId: string
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requireAdmin();
+    const admin = createAdminClient();
+    const { error } = await admin
+      .from("playoff_matchups")
+      .update({ gw_round_id: gwRoundId })
+      .eq("league_id", leagueId)
+      .eq("round", round);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath(`/slutspel/${leagueId}`);
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+export async function adminSettlePlayoffRound(leagueId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requireAdmin();
+    const admin = createAdminClient();
+    await settleCurrentRound(admin, leagueId);
+    revalidatePath("/slutspel");
+    revalidatePath(`/slutspel/${leagueId}`);
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
+export async function adminDeletePlayoff(leagueId: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requireAdmin();
+    const admin = createAdminClient();
+    const { error } = await admin.from("playoff_leagues").delete().eq("id", leagueId);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/slutspel");
+    revalidatePath("/admin");
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: String(e?.message ?? e) };
