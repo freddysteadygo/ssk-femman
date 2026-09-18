@@ -1,14 +1,15 @@
 name: Skrapa matchresultat
 
-# Pingar /api/cron/results så matchdata hämtas och poäng räknas flera gånger
-# per matchkväll (Vercel Hobby tillåter bara en cron-körning per dygn).
-# Endpointen är idempotent och skyddad med CRON_SECRET.
-# KRÄVS: repo-secreten CRON_SECRET med SAMMA värde som i Vercel.
+# Pingar två endpoints var 30:e minut:
+#   /api/cron/results    – hämtar matchdata och räknar poäng
+#   /api/cron/reminders  – skickar påminnelsemejl, men bara i kvällsfönstret
+#                          (19:30-20:30 svensk tid) eller när deadline är nara.
+# Bada ar idempotenta och skyddade med CRON_SECRET.
+# KRAVS: repo-secreten CRON_SECRET med SAMMA varde som i Vercel.
 
 on:
   schedule:
-    # Var 30:e minut 11:00-22:59 UTC (ca 13-00:30 svensk tid) - tacker
-    # helgeftermiddagar (14:00) och kvallsmatcher, fore avspark till efter slut.
+    # Var 30:e minut 11:00-22:59 UTC (ca 13-00:30 svensk tid).
     - cron: "*/30 11-22 * * *"
   workflow_dispatch: {}
 
@@ -34,5 +35,19 @@ jobs:
           echo ""
           if [ "$code" != "200" ]; then
             echo "::error::results-endpoint svarade $code"
+            exit 1
+          fi
+
+      - name: Ping reminders-endpoint
+        if: always()
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          code=$(curl -sS --location-trusted --max-time 60 -o /tmp/rem.txt -w "%{http_code}" -H "Authorization: Bearer $CRON_SECRET" "https://www.sskfemman.se/api/cron/reminders")
+          echo "HTTP $code"
+          cat /tmp/rem.txt
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::reminders-endpoint svarade $code"
             exit 1
           fi
