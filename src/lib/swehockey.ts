@@ -23,6 +23,13 @@ const BASE = "https://stats.swehockey.se";
 const UA =
   "SSK-femman/0.1 (hobbyprojekt; kontakt: freddy@steadygo.se) polite-scraper";
 
+// Schemasidan har nastlade tabeller vars yttre rader innehaller HELA sidan
+// (tusentals celler). Riktiga matchrader har en handfull celler.
+const MAX_ROW_CELLS = 20;
+// Hur langt fram i tiden vi bryr oss om att sla upp spel-id (matcher som inte
+// spelats behover inget id for settlement).
+const ID_LOOKUP_DAYS_AHEAD = 14;
+
 export interface ScheduledMatch {
   swehockeyGameId: string | null;
   date: string; // ISO om möjligt, annars rå text
@@ -135,6 +142,8 @@ export async function getSskSchedule(
       .map((__, td) => clean($(td).text()))
       .get();
     if (!cells.length) return;
+    // Hoppa over nastlade container-rader som svaljer hela sidan.
+    if (cells.length > MAX_ROW_CELLS) return;
 
     const dateInRow = cells.map((c) => (c.match(/\d{4}-\d{2}-\d{2}/) || [])[0]).find(Boolean);
     if (dateInRow) currentDate = dateInRow;
@@ -153,7 +162,57 @@ export async function getSskSchedule(
     if (parsed) out.push({ ...parsed, swehockeyGameId: gameId });
   });
 
-  return dedupeByGameId(out);
+  return resolveGameIds(dedupeByGameId(out), teamName);
+}
+
+/**
+ * Sasongsschemat innehaller INGA matchlankar - spel-id finns bara i
+ * datumvyn (/GamesByDate/YYYY-MM-DD). Vi slar darfor upp id per datum,
+ * med cache sa varje datum bara hamtas en gang.
+ */
+async function resolveGameIds(
+  matches: ScheduledMatch[],
+  teamName: string
+): Promise<ScheduledMatch[]> {
+  const cache = new Map<string, string | null>();
+  const cutoff = Date.now() + ID_LOOKUP_DAYS_AHEAD * 86_400_000;
+
+  for (const m of matches) {
+    if (m.swehockeyGameId) continue;
+    const ymd = (m.date.match(/\d{4}-\d{2}-\d{2}/) || [""])[0];
+    if (!ymd) continue;
+    // Bara matcher som spelats eller narmar sig - resten far id senare.
+    if (new Date(`${ymd}T00:00:00`).getTime() > cutoff) continue;
+
+    if (!cache.has(ymd)) {
+      cache.set(ymd, await gameIdForDate(ymd, teamName));
+    }
+    m.swehockeyGameId = cache.get(ymd) ?? null;
+  }
+  return matches;
+}
+
+/** Plockar SSK:s spel-id for ett datum ur /GamesByDate. */
+async function gameIdForDate(ymd: string, teamName: string): Promise<string | null> {
+  try {
+    const html = await fetchHtml(`/GamesByDate/${ymd}`);
+    const $ = cheerio.load(html);
+    let found: string | null = null;
+    $("tr").each((_, tr) => {
+      if (found) return;
+      const cells = $(tr).find("td").length;
+      if (!cells || cells > MAX_ROW_CELLS) return;
+      const txt = clean($(tr).text()).toLowerCase();
+      if (!txt.includes(teamName.toLowerCase())) return;
+      const href = $(tr).find('a[href*="/Game/"]').attr("href") || "";
+      const m = href.match(/\/Game\/\w+\/(\d+)/);
+      if (m) found = m[1];
+    });
+    return found;
+  } catch (e) {
+    console.error(`kunde inte hamta spel-id for ${ymd}:`, e);
+    return null;
+  }
 }
 
 function parseScheduleRow(
