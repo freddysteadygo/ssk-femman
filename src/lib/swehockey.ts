@@ -43,7 +43,9 @@ export interface ScheduledMatch {
 export interface ScrapedGoalEvent {
   team: string; // rå lagsträng ur rapporten (t.ex. "SSK")
   scorer: string;
+  scorerNo: number | null;
   assists: string[];
+  assistNos: (number | null)[];
   situation: "EQ" | "PP" | "SH" | "PS" | "EN" | "UNKNOWN";
   time: string;
   posPart: number[]; // ej tillgängligt i denna vy → tom
@@ -52,6 +54,7 @@ export interface ScrapedGoalEvent {
 
 export interface ScrapedGoalie {
   name: string;
+  no: number | null;
   saves: number;
   shotsAgainst: number;
   goalsAgainst: number;
@@ -61,6 +64,7 @@ export interface ScrapedGoalie {
 export interface ScrapedPenalty {
   team: string;
   player: string;
+  playerNo: number | null;
   minutes: number;
 }
 
@@ -394,6 +398,7 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
       const first = splitPlayers(c3)[0];
       const entry: ScrapedGoalie = {
         name: first ? first.name : c3,
+        no: first ? first.no : null,
         saves,
         shotsAgainst: shots,
         goalsAgainst: shots - saves,
@@ -424,7 +429,9 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
         goals.push({
           team,
           scorer: players[0].name,
+          scorerNo: players[0].no,
           assists: players.slice(1, 3).map((p) => p.name),
+          assistNos: players.slice(1, 3).map((p) => p.no),
           situation,
           time: c0,
           posPart: part.pos,
@@ -438,7 +445,12 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
     const pen = c1.match(/^(\d+)\s*min/i);
     if (pen) {
       const first = splitPlayers(c3)[0];
-      penalties.push({ team, player: first ? first.name : c3, minutes: parseInt(pen[1], 10) });
+      penalties.push({
+        team,
+        player: first ? first.name : c3,
+        playerNo: first ? first.no : null,
+        minutes: parseInt(pen[1], 10),
+      });
       continue;
     }
   }
@@ -507,13 +519,18 @@ function splitPlayers(str: string): { no: number; name: string }[] {
 // NAMN-NORMALISERING (matcha scrapade namn mot players-tabellen)
 // swehockey: "Efternamn, Förnamn"  →  normaliserad nyckel
 // ------------------------------------------------------------
+/**
+ * "Muzito Bagenda, Daniel" och "Daniel Muzito-Bagenda" ska bli samma nyckel.
+ * Bindestreck och punkter behandlas darfor som mellanslag.
+ */
 export function normalizeName(name: string): string {
-  const n = name.toLowerCase().trim();
+  const clean = (x: string) => x.replace(/[-.\u2013\u2019']/g, " ").replace(/\s+/g, " ").trim();
+  const n = clean(name.toLowerCase());
   if (n.includes(",")) {
-    const [last, first] = n.split(",").map((s) => s.trim());
-    return `${first} ${last}`.replace(/\s+/g, " ");
+    const [last, first] = n.split(",").map((x) => clean(x));
+    return clean(`${first} ${last}`);
   }
-  return n.replace(/\s+/g, " ");
+  return n;
 }
 
 export { toInt };

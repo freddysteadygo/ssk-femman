@@ -277,7 +277,14 @@ async function resolveMissingGameIds(sb: Sb): Promise<number> {
 
 export async function settleMatches(
   force = false
-): Promise<{ settled: string[]; failed: string[]; pending: string[]; idsFound: number }> {
+): Promise<{
+  settled: string[];
+  failed: string[];
+  pending: string[];
+  idsFound: number;
+  /** Spelare i rapporten som inte finns i truppen — deras poäng går förlorade. */
+  unmatched: string[];
+}> {
   const sb = createAdminClient();
 
   // Steg 1: fyll i spel-id for matcher som just spelats.
@@ -294,6 +301,7 @@ export async function settleMatches(
   const settled: string[] = [];
   const failed: string[] = [];
   const pending: string[] = [];
+  const unmatched = new Set<string>();
   const roster = await loadRoster(sb);
   // Paus mellan matchrapporterna sa swehockey inte stryper andra anropet.
   const PAUSE_MS = 1200;
@@ -318,7 +326,7 @@ export async function settleMatches(
         pending.push(m.id);
         continue;
       }
-      await settleOneMatch(sb, m, summary, roster);
+      await settleOneMatch(sb, m, summary, roster, unmatched);
       settled.push(m.id);
     } catch (e) {
       console.error(`settle-fel match ${m.id} (spel ${m.swehockey_game_id}):`, e);
@@ -330,7 +338,11 @@ export async function settleMatches(
   const roundIds = new Set((matches ?? []).map((m) => m.round_id).filter(Boolean));
   for (const rid of roundIds) await recomputeRound(sb, rid as string);
 
-  return { settled, failed, pending, idsFound };
+  if (unmatched.size) {
+    console.error("spelare saknas i truppen:", [...unmatched].join(", "));
+  }
+
+  return { settled, failed, pending, idsFound, unmatched: [...unmatched] };
 }
 
 interface RosterEntry {
@@ -358,13 +370,29 @@ function jerseyMap(roster: RosterEntry[]): Map<number, RosterEntry> {
 
 function matchPlayer(roster: RosterEntry[], scrapedName: string): RosterEntry | null {
   const key = normalizeName(scrapedName);
+  if (!key) return null;
+
   // exakt
-  let hit = roster.find((r) => r.key === key);
-  if (hit) return hit;
-  // efternamnsmatch (unikt)
-  const last = key.split(" ").slice(-1)[0];
-  const cands = roster.filter((r) => r.key.split(" ").slice(-1)[0] === last);
-  if (cands.length === 1) return cands[0];
+  const exact = roster.find((r) => r.key === key);
+  if (exact) return exact;
+
+  // Rapporten kortar ibland av dubbelnamn ("Holst, Filip" för Filip Holst
+  // Persson). Matcha pa fornamn + att alla ovriga ord finns i rostern.
+  const parts = key.split(" ").filter(Boolean);
+  const first = parts[0];
+  const rest = parts.slice(1);
+  if (first && rest.length) {
+    const cands = roster.filter((r) => {
+      const rp = r.key.split(" ").filter(Boolean);
+      return rp[0] === first && rest.every((w) => rp.includes(w));
+    });
+    if (cands.length === 1) return cands[0];
+  }
+
+  // sista utvagen: unikt efternamn
+  const last = parts[parts.length - 1];
+  const byLast = roster.filter((r) => r.key.split(" ").includes(last));
+  if (byLast.length === 1) return byLast[0];
   return null;
 }
 
@@ -372,7 +400,8 @@ async function settleOneMatch(
   sb: Sb,
   match: any,
   summary: GameSummary,
-  roster: RosterEntry[]
+  roster: RosterEntry[],
+  unmatched: Set<string>
 ) {
   // slutresultat ur SSK-perspektiv
   const sskGoals = match.is_home ? summary.homeGoals : summary.awayGoals;
@@ -393,6 +422,24 @@ async function settleOneMatch(
   type Acc = { goals: number; assists: number; pp: number; plus: number; minor: number; major: number; pim: number };
   const skater = new Map<string, Acc>();
   const jmap = jerseyMap(roster);
+
+  /**
+   * Tronumret ar den palitliga nyckeln — rapporten skriver alltid ut det, och
+   * det ar unikt i truppen. Namnstavningen skiljer sig daremot ofta
+   * ("Muzito Bagenda" mot "Muzito-Bagenda", "Holst" mot "Holst Persson").
+   * Darfor: nummer forst, namn som reserv.
+   */
+  const find = (name: string, no: number | null | undefined): RosterEntry | null => {
+    if (no != null) {
+      const byNo = jmap.get(no);
+      if (byNo) return byNo;
+    }
+    const byName = matchPlayer(roster, name);
+    if (byName) return byName;
+    // Okand spelare — nastan alltid nagon som saknas i truppen.
+    if (name) unmatched.add(`${no != null ? no + ". " : ""}${name}`);
+    return null;
+  };
   const acc = (id: string): Acc => {
     let cur = skater.get(id);
     if (!cur) { cur = { goals: 0, assists: 0, pp: 0, plus: 0, minor: 0, major: 0, pim: 0 }; skater.set(id, cur); }
@@ -400,20 +447,23 @@ async function settleOneMatch(
   };
 
   for (const g of summary.goals) {
-    const s = matchPlayer(roster, g.scorer);
-    const sskScored = isSskTeam(g.team) ?? !!(s && s.position !== "G");
+    const sskByTeam = isSskTeam(g.team);
+    // Bara SSK:s mal ska ge poang — leta bara upp spelaren nar det ar vart mal,
+    // annars skulle motstandarnamn rapporteras som "okanda spelare".
+    const s = sskByTeam === false ? null : find(g.scorer, g.scorerNo);
+    const sskScored = sskByTeam ?? !!(s && s.position !== "G");
     if (sskScored && s && s.position !== "G") {
       acc(s.id).goals++;
       if (g.situation === "PP") acc(s.id).pp++;
     }
     if (sskScored) {
-      for (const a of g.assists) {
-        const ap = matchPlayer(roster, a);
+      g.assists.forEach((a, i) => {
+        const ap = find(a, g.assistNos?.[i] ?? null);
         if (ap && ap.position !== "G") {
           acc(ap.id).assists++;
           if (g.situation === "PP") acc(ap.id).pp++;
         }
-      }
+      });
     }
     // +/- : SSK-spelare på isen. Vann SSK målet → Pos. Part. (+1), annars Neg. Part. (−1).
     const onIce = sskScored ? g.posPart : g.negPart;
@@ -427,7 +477,7 @@ async function settleOneMatch(
   // Utvisningar (endast SSK-spelare): 2 min = minor, > 2 min = major
   for (const pen of summary.penalties) {
     if (isSskTeam(pen.team) === false) continue;
-    const p = matchPlayer(roster, pen.player);
+    const p = find(pen.player, pen.playerNo);
     if (!p || p.position === "G") continue;
     const a = acc(p.id);
     a.pim += pen.minutes;
@@ -458,7 +508,7 @@ async function settleOneMatch(
   // ---- Målvakter (endast SSK-målvakter är relevanta) ----
   const allGoalies = [...summary.goalies.home, ...summary.goalies.away];
   const sskGoalies = allGoalies
-    .map((gk) => ({ gk, p: matchPlayer(roster, gk.name) }))
+    .map((gk) => ({ gk, p: gk.no != null ? jmap.get(gk.no) ?? matchPlayer(roster, gk.name) : matchPlayer(roster, gk.name) }))
     .filter((x) => x.p && x.p.position === "G");
 
   // startande = flest skott mot
