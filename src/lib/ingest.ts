@@ -175,20 +175,36 @@ export async function carryOverEntries(sb: Sb, roundId: string): Promise<number>
     .maybeSingle();
   if (!round) return 0;
 
-  const { data: prev } = await sb
+  // Tidigare omgangar, nyast forst. Vi tittar inte bara pa den allra senaste:
+  // hoppar nagon over en omgang ska femman anda folja med fran den senaste
+  // omgang spelaren faktiskt lamnade in, annars bryts kedjan for alltid.
+  const { data: earlier } = await sb
     .from("rounds")
-    .select("id")
+    .select("id, deadline")
     .lt("deadline", round.deadline)
     .order("deadline", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!prev) return 0;
+    .limit(10);
+  if (!earlier?.length) return 0;
 
-  const { data: prevEntries } = await sb
+  const earlierIds = earlier.map((r) => r.id);
+  const rank = new Map(earlierIds.map((id, i) => [id, i])); // 0 = senast
+
+  const { data: candidates } = await sb
     .from("entries")
-    .select("id, user_id, goalie_id, captain_id")
-    .eq("round_id", prev.id);
-  if (!prevEntries?.length) return 0;
+    .select("id, user_id, goalie_id, captain_id, round_id")
+    .in("round_id", earlierIds);
+  if (!candidates?.length) return 0;
+
+  // Per spelare: behall den entry som ligger narmast i tiden.
+  const latest = new Map<string, any>();
+  for (const e of candidates) {
+    const cur = latest.get(e.user_id);
+    if (!cur || (rank.get(e.round_id) ?? 99) < (rank.get(cur.round_id) ?? 99)) {
+      latest.set(e.user_id, e);
+    }
+  }
+  const prevEntries = [...latest.values()];
+  if (!prevEntries.length) return 0;
 
   const { data: already } = await sb.from("entries").select("user_id").eq("round_id", roundId);
   const have = new Set((already ?? []).map((e) => e.user_id));
