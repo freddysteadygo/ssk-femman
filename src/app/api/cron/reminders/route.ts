@@ -92,7 +92,10 @@ export async function GET(req: NextRequest) {
       <div style="font-family:system-ui,sans-serif;max-width:520px">
         <h2 style="color:#122a6b">${title} är öppen</h2>
         <p>Deadline: <b>${deadline}</b>.</p>
-        <p>Välj din femma, gissa målvakten och tippa matcherna innan det stänger.</p>
+        <p>
+          Din femma från förra omgången följer med automatiskt — men du kan byta spelare, sätta
+          kapten (dubbla poäng) och tippa matcherna fram till deadline.
+        </p>
         <p><a href="${site}/spela" style="background:#1b3fb0;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;display:inline-block">Till spelet</a></p>
         <p style="color:#5c6373;font-size:12px">Du får detta för att du valt notiser i SSK-femman. Ändra under Inställningar.</p>
       </div>`;

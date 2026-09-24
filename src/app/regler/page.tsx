@@ -16,8 +16,9 @@ export default function ReglerPage() {
         <h1 className="text-2xl font-bold">Så funkar SSK-femman</h1>
         <p className="mt-2 text-ssk-muted">
           Varje omgång väljer du <b>2 backar + 3 forwards</b>, gissar vilken <b>målvakt</b> som
-          startar, och tippar <b>resultatet</b> på omgångens matcher. Dina spelare samlar poäng
-          utifrån vad de gör i SSK:s matcher. Mest poäng i din liga vinner.
+          startar, och tippar <b>resultatet</b> på omgångens matcher. En av de fem utser du till
+          <b> kapten</b> — kaptenens poäng räknas dubbelt. Dina spelare samlar poäng utifrån vad de
+          gör i SSK:s matcher. Mest poäng i din liga vinner.
         </p>
       </div>
 
@@ -64,7 +65,12 @@ export default function ReglerPage() {
       <section className="card p-5">
         <h2 className="font-semibold">Bra att veta</h2>
         <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ssk-muted">
-          <li>Femman och tipsen låses vid omgångens deadline (oftast första matchens start).</li>
+          <li>Femman, kaptenen och tipsen låses vid omgångens deadline (30 min före första matchen).</li>
+          <li>
+            Din femma följer med till nästa omgång automatiskt — du behöver bara gå in om du vill
+            ändra något.
+          </li>
+          <li>Kaptenen dubblar spelarens poäng, även när poängen är negativ. Att utse kapten är frivilligt.</li>
           <li>+/- räknas ur vilka som stod på isen vid varje mål.</li>
           <li>All statistik hämtas från stats.swehockey.se efter varje match.</li>
           <li>Poängvärdena kan justeras något efter de första omgångarna.</li>

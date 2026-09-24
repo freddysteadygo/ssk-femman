@@ -61,7 +61,8 @@ export async function setTeamName(name: string): Promise<{ ok: boolean; error?: 
 export async function saveEntry(
   roundId: string,
   playerIds: string[],
-  goalieId: string | null
+  goalieId: string | null,
+  captainId: string | null = null
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const { sb, user } = await requireUser();
@@ -76,6 +77,9 @@ export async function saveEntry(
     if (backs !== 2 || fwds !== 3) {
       return { ok: false, error: "Femman måste vara exakt 2 backar och 3 forwards." };
     }
+    if (captainId && !playerIds.includes(captainId)) {
+      return { ok: false, error: "Kaptenen måste vara en av dina fem utespelare." };
+    }
 
     const { data: round } = await sb.from("rounds").select("*").eq("id", roundId).single();
     if (!round) return { ok: false, error: "Omgången finns inte." };
@@ -87,7 +91,15 @@ export async function saveEntry(
     const { data: entry, error: e1 } = await sb
       .from("entries")
       .upsert(
-        { user_id: user.id, round_id: roundId, goalie_id: goalieId, submitted_at: new Date().toISOString() },
+        {
+          user_id: user.id,
+          round_id: roundId,
+          goalie_id: goalieId,
+          captain_id: captainId,
+          // Spelaren har aktivt valt — inte langre en overford femma.
+          carried_over: false,
+          submitted_at: new Date().toISOString(),
+        },
         { onConflict: "user_id,round_id" }
       )
       .select("id")

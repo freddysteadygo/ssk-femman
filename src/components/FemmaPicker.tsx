@@ -30,6 +30,26 @@ interface TipState {
   pred_opp: number;
 }
 
+export interface LastRoundSummary {
+  name: string;
+  femmaPoints: number;
+  tipPoints: number;
+  rows: {
+    id: string;
+    name: string;
+    jersey: number | null;
+    role: string;
+    points: number;
+    captain: boolean;
+  }[];
+}
+
+/** 4 → "4", 4.5 → "4,5". Svenskt decimaltecken, inga onödiga nollor. */
+function pts(n: number | undefined): string {
+  const v = n ?? 0;
+  return (Math.round(v * 10) / 10).toLocaleString("sv-SE");
+}
+
 const MAX_D = 2;
 const MAX_F = 3;
 
@@ -39,16 +59,26 @@ export function FemmaPicker({
   matches,
   initialPicks,
   initialGoalie,
+  initialCaptain,
   initialTips,
   locked,
+  carriedOver,
+  pointsLast,
+  pointsSeason,
+  lastRound,
 }: {
   round: Round;
   players: Player[];
   matches: Match[];
   initialPicks: string[];
   initialGoalie: string | null;
+  initialCaptain: string | null;
   initialTips: TipState[];
   locked: boolean;
+  carriedOver: boolean;
+  pointsLast: Record<string, number>;
+  pointsSeason: Record<string, number>;
+  lastRound: LastRoundSummary | null;
 }) {
   const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
   const backs = useMemo(() => players.filter((p) => p.position === "D"), [players]);
@@ -57,6 +87,7 @@ export function FemmaPicker({
 
   const [picks, setPicks] = useState<string[]>(initialPicks);
   const [goalie, setGoalie] = useState<string | null>(initialGoalie);
+  const [captain, setCaptain] = useState<string | null>(initialCaptain);
   const [tips, setTips] = useState<Record<string, { s: string; o: string }>>(() => {
     const m: Record<string, { s: string; o: string }> = {};
     for (const t of initialTips) m[t.match_id] = { s: String(t.pred_ssk), o: String(t.pred_opp) };
@@ -87,6 +118,8 @@ export function FemmaPicker({
 
   function togglePick(p: Player) {
     if (locked) return;
+    // Plockar man bort kaptenen ur femman faller kaptensbindeln bort.
+    if (captain === p.id) setCaptain(null);
     setPicks((cur) => {
       if (cur.includes(p.id)) return cur.filter((x) => x !== p.id);
       const count = cur.filter((id) => byId.get(id)?.position === p.position).length;
@@ -98,7 +131,7 @@ export function FemmaPicker({
   function submitEntry() {
     setMsg(null);
     startTransition(async () => {
-      const res = await saveEntry(round.id, picks, goalie);
+      const res = await saveEntry(round.id, picks, goalie, captain);
       setMsg(res.ok ? "Femman sparad! ✓" : res.error ?? "Något gick fel.");
     });
   }
@@ -144,6 +177,13 @@ export function FemmaPicker({
         )}
       </header>
 
+      {carriedOver && !locked && (
+        <div className="card border-ssk-blue/40 bg-ssk-goldSoft p-3 text-sm">
+          <b>Din femma följde med från förra omgången.</b> Du behöver inte göra något —
+          ändra bara om du vill, och spara.
+        </div>
+      )}
+
       {msg && <div className="card p-3 text-sm">{msg}</div>}
 
       {/* Flikar */}
@@ -169,6 +209,47 @@ export function FemmaPicker({
       {/* FEMMA: lista vänster, rink höger */}
       {tab === "femma" && (
       <section>
+        {lastRound && (
+          <div className="card mb-6 p-4">
+            <div className="flex items-baseline justify-between gap-3 border-b border-ssk-line pb-2">
+              <h3 className="font-semibold">Så gick det i {lastRound.name}</h3>
+              <span className="text-xl font-extrabold tabular-nums text-ssk-blue">
+                {pts(lastRound.femmaPoints + lastRound.tipPoints)} p
+              </span>
+            </div>
+
+            {lastRound.rows.length === 0 ? (
+              <p className="label mt-3">Du hade ingen femma den omgången.</p>
+            ) : (
+              <ul className="mt-1 divide-y divide-ssk-line text-sm">
+                {lastRound.rows.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-3 py-1.5">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="w-6 shrink-0 text-right text-[11px] tabular-nums text-ssk-muted">
+                        {r.jersey ?? ""}
+                      </span>
+                      <span className="truncate">{r.name}</span>
+                      {r.captain && (
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ssk-yellow text-[10px] font-extrabold text-ssk-navy">
+                          C
+                        </span>
+                      )}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-3">
+                      <span className="hidden text-[11px] text-ssk-muted sm:inline">{r.role}</span>
+                      <span className="w-14 text-right font-semibold tabular-nums">{pts(r.points)} p</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            <div className="mt-3 flex justify-between border-t border-ssk-line pt-2 text-sm">
+              <span className="text-ssk-muted">Femman {pts(lastRound.femmaPoints)} p · Resultattips {pts(lastRound.tipPoints)} p</span>
+            </div>
+          </div>
+        )}
+
         <div className="mb-4 flex items-center justify-between border-b border-ssk-line pb-2">
           <h2 className="text-lg font-semibold">Din femma</h2>
           <span className="label">
@@ -180,9 +261,11 @@ export function FemmaPicker({
           {/* VÄNSTER: val */}
           <div className="space-y-6">
             <PickSection title="Backar" count={pickedBacks.length} max={MAX_D}
-              players={backs} picks={picks} locked={locked} onToggle={togglePick} />
+              players={backs} picks={picks} locked={locked} onToggle={togglePick}
+              pointsLast={pointsLast} pointsSeason={pointsSeason} />
             <PickSection title="Forwards" count={pickedForwards.length} max={MAX_F}
-              players={forwards} picks={picks} locked={locked} onToggle={togglePick} />
+              players={forwards} picks={picks} locked={locked} onToggle={togglePick}
+              pointsLast={pointsLast} pointsSeason={pointsSeason} />
 
             <div className="space-y-2">
               <h3 className="text-sm font-semibold">Målvakt (gissa vem som startar)</h3>
@@ -201,10 +284,41 @@ export function FemmaPicker({
                       <span className="block truncate text-[13px] leading-tight">{g.full_name}</span>
                       <span className="block text-[10px] leading-tight text-ssk-muted">{goalieStatLine(g.full_name)}</span>
                     </span>
+                    <PointsChip last={pointsLast[g.id]} season={pointsSeason[g.id]} />
                   </button>
                 ))}
                 {goalies.length === 0 && <p className="label">Inga målvakter i truppen ännu.</p>}
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Kapten (dubbla poäng)</h3>
+              {picks.length === 0 ? (
+                <p className="label">Välj din femma först — sedan utser du kapten.</p>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    {picks.map((id) => byId.get(id)).filter((p): p is Player => !!p).map((p) => (
+                      <button key={p.id}
+                        onClick={() => !locked && setCaptain(captain === p.id ? null : p.id)}
+                        disabled={locked}
+                        className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-left transition-colors ${
+                          captain === p.id
+                            ? "border-ssk-blue bg-ssk-blue/10 ring-1 ring-ssk-blue"
+                            : "border-ssk-line bg-ssk-cream hover:border-ssk-blue hover:bg-ssk-goldSoft"
+                        }`}>
+                        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold ${
+                          captain === p.id ? "bg-ssk-yellow text-ssk-navy" : "bg-ssk-line text-ssk-muted"
+                        }`}>C</span>
+                        <span className="truncate text-[13px] leading-tight">{p.full_name}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <p className="label">
+                    Kaptenens poäng räknas dubbelt — även minuspoäng. Frivilligt, och låses vid deadline.
+                  </p>
+                </>
+              )}
             </div>
 
             <button onClick={submitEntry} disabled={locked || pending || !complete} className="btn-primary w-full sm:w-auto">
@@ -224,8 +338,8 @@ export function FemmaPicker({
                 <div className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500/60" />
               </div>
               <div className="relative z-10 space-y-5 px-3 py-6">
-                <RinkRow label="Forward" slots={fwSlots} surname={surname} />
-                <RinkRow label="Back" slots={dSlots} surname={surname} />
+                <RinkRow label="Forward" slots={fwSlots} surname={surname} captainId={captain} />
+                <RinkRow label="Back" slots={dSlots} surname={surname} captainId={captain} />
                 <RinkRow label="Målvakt" slots={[gSlot]} surname={surname} goalie />
               </div>
             </div>
@@ -308,11 +422,13 @@ function RinkRow({
   slots,
   surname,
   goalie = false,
+  captainId = null,
 }: {
   label: string;
   slots: (Player | null)[];
   surname: (p?: Player) => string;
   goalie?: boolean;
+  captainId?: string | null;
 }) {
   return (
     <div className="flex items-start justify-center gap-3 sm:gap-6">
@@ -320,7 +436,14 @@ function RinkRow({
         <div key={i} className="flex w-20 flex-col items-center gap-1">
           {p ? (
             <>
-              <Jersey number={p.jersey_no} size={goalie ? 58 : 52} />
+              <span className="relative inline-block">
+                <Jersey number={p.jersey_no} size={goalie ? 58 : 52} />
+                {captainId === p.id && (
+                  <span className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-ssk-yellow text-[11px] font-extrabold text-ssk-navy ring-2 ring-white">
+                    C
+                  </span>
+                )}
+              </span>
               <span className="max-w-full truncate rounded bg-ssk-black/85 px-1.5 py-0.5 text-[11px] leading-tight text-white">
                 {p.jersey_no ? `${p.jersey_no} ` : ""}{surname(p)}
               </span>
@@ -338,6 +461,18 @@ function RinkRow({
   );
 }
 
+function PointsChip({ last, season }: { last?: number; season?: number }) {
+  const has = (season ?? 0) !== 0 || (last ?? 0) !== 0;
+  return (
+    <span className="shrink-0 text-right leading-tight">
+      <span className={`block text-[13px] font-bold tabular-nums ${has ? "text-ssk-blue" : "text-ssk-muted"}`}>
+        {pts(season)} p
+      </span>
+      <span className="block text-[10px] tabular-nums text-ssk-muted">senast {pts(last)}</span>
+    </span>
+  );
+}
+
 function PickSection({
   title,
   count,
@@ -346,6 +481,8 @@ function PickSection({
   picks,
   locked,
   onToggle,
+  pointsLast,
+  pointsSeason,
 }: {
   title: string;
   count: number;
@@ -354,6 +491,8 @@ function PickSection({
   picks: string[];
   locked: boolean;
   onToggle: (p: Player) => void;
+  pointsLast: Record<string, number>;
+  pointsSeason: Record<string, number>;
 }) {
   return (
     <section className="space-y-2">
@@ -377,6 +516,7 @@ function PickSection({
                 <span className="block truncate text-[13px] leading-tight">{p.full_name}</span>
                 <span className="block text-[10px] leading-tight text-ssk-muted">{skaterStatLine(p.full_name)}</span>
               </span>
+              <PointsChip last={pointsLast[p.id]} season={pointsSeason[p.id]} />
             </button>
           );
         })}

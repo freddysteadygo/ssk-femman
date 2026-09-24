@@ -9,7 +9,9 @@ import { createAdminClient } from "./supabase/admin";
 import {
   getSskSchedule,
   getGameSummary,
+  lookupGameId,
   normalizeName,
+  sleep,
   type GameSummary,
 } from "./swehockey";
 import { scoreSkater, scoreGoalie, scoreTip, regulationScore } from "./scoring";
@@ -136,15 +138,152 @@ export async function syncSchedule(): Promise<{ rounds: number; matches: number 
     }
   }
 
+  // For over femmorna till narmaste oppna omgang sa ingen behover valja om.
+  try {
+    const { data: next } = await sb
+      .from("rounds")
+      .select("id")
+      .gte("deadline", new Date().toISOString())
+      .order("deadline", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (next) await carryOverEntries(sb, next.id);
+  } catch (e) {
+    console.error("carry-over-fel:", e);
+  }
+
   return { rounds: roundsUpserted, matches: matchesUpserted };
+}
+
+// ------------------------------------------------------------
+// 1b) OVERFOR FEMMAN TILL NASTA OMGANG
+// ------------------------------------------------------------
+/**
+ * Kopierar foregaende omgangs femma, malvakt och kapten till `roundId` for
+ * alla som inte redan lagt en femma dar. Spelaren behaller alltsa sitt lag
+ * tills hen aktivt andrar det.
+ *
+ * Idempotent: hoppar over alla som redan har en entry i omgangen.
+ * Spelare som blivit inaktiva (skadade/lamnat klubben) foljer inte med — da
+ * hoppas overforingen over helt sa att anvandaren far valja sjalv.
+ */
+export async function carryOverEntries(sb: Sb, roundId: string): Promise<number> {
+  const { data: round } = await sb
+    .from("rounds")
+    .select("id, deadline")
+    .eq("id", roundId)
+    .maybeSingle();
+  if (!round) return 0;
+
+  const { data: prev } = await sb
+    .from("rounds")
+    .select("id")
+    .lt("deadline", round.deadline)
+    .order("deadline", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!prev) return 0;
+
+  const { data: prevEntries } = await sb
+    .from("entries")
+    .select("id, user_id, goalie_id, captain_id")
+    .eq("round_id", prev.id);
+  if (!prevEntries?.length) return 0;
+
+  const { data: already } = await sb.from("entries").select("user_id").eq("round_id", roundId);
+  const have = new Set((already ?? []).map((e) => e.user_id));
+
+  const { data: activePlayers } = await sb.from("players").select("id").eq("active", true);
+  const active = new Set((activePlayers ?? []).map((p) => p.id));
+
+  let carried = 0;
+  for (const pe of prevEntries) {
+    if (have.has(pe.user_id)) continue;
+
+    const { data: picks } = await sb.from("entry_picks").select("player_id").eq("entry_id", pe.id);
+    const ids = (picks ?? []).map((x) => x.player_id);
+    // Bara hela, fortfarande giltiga femmor foljer med.
+    if (ids.length !== 5 || ids.some((id) => !active.has(id))) continue;
+
+    const goalieOk = pe.goalie_id && active.has(pe.goalie_id) ? pe.goalie_id : null;
+    const captainOk = pe.captain_id && ids.includes(pe.captain_id) ? pe.captain_id : null;
+
+    const { data: ne, error } = await sb
+      .from("entries")
+      .insert({
+        user_id: pe.user_id,
+        round_id: roundId,
+        goalie_id: goalieOk,
+        captain_id: captainOk,
+        carried_over: true,
+      })
+      .select("id")
+      .single();
+    if (error || !ne) continue;
+
+    const { error: pickErr } = await sb
+      .from("entry_picks")
+      .insert(ids.map((pid) => ({ entry_id: ne.id, player_id: pid })));
+    if (pickErr) {
+      // Halvfardig entry ar varre an ingen — stada upp.
+      await sb.from("entries").delete().eq("id", ne.id);
+      continue;
+    }
+    carried++;
+  }
+  return carried;
 }
 
 // ------------------------------------------------------------
 // 2) SETTLEMENT — matchrapport → stats → poäng
 // ------------------------------------------------------------
-export async function settleMatches(force = false): Promise<{ settled: string[] }> {
+// Hur lange efter matchstart vi fortsatter leta spel-id.
+const ID_LOOKUP_WINDOW_DAYS = 4;
+
+/**
+ * swehockey publicerar ingen matchlank forran kring matchstart — schemasidan
+ * for en kommande match ar helt utan lankar. Schema-synken 06:00 hittar alltsa
+ * aldrig id:t for kvallens match. Darfor letar resultatkorningen sjalv: den
+ * kor efter matchen och da finns lanken.
+ */
+async function resolveMissingGameIds(sb: Sb): Promise<number> {
+  const now = Date.now();
+  const since = new Date(now - ID_LOOKUP_WINDOW_DAYS * 86_400_000).toISOString();
+
+  const { data: pending } = await sb
+    .from("matches")
+    .select("id, opponent, starts_at")
+    .is("swehockey_game_id", null)
+    .lte("starts_at", new Date(now).toISOString())
+    .gte("starts_at", since);
+  if (!pending?.length) return 0;
+
+  let found = 0;
+  for (const m of pending) {
+    const ymd = new Date(m.starts_at).toLocaleDateString("sv-SE", {
+      timeZone: "Europe/Stockholm",
+    });
+    try {
+      const gid = await lookupGameId(ymd, m.opponent);
+      if (!gid) continue;
+      await sb.from("matches").update({ swehockey_game_id: gid }).eq("id", m.id);
+      found++;
+    } catch (e) {
+      console.error(`spel-id-uppslag misslyckades for ${m.opponent} ${ymd}:`, e);
+    }
+  }
+  return found;
+}
+
+export async function settleMatches(
+  force = false
+): Promise<{ settled: string[]; failed: string[]; pending: string[]; idsFound: number }> {
   const sb = createAdminClient();
-  // matcher som spelats men inte är settlade (eller alla om force)
+
+  // Steg 1: fyll i spel-id for matcher som just spelats.
+  const idsFound = await resolveMissingGameIds(sb);
+
+  // Steg 2: matcher som spelats men inte är settlade (eller alla om force)
   const nowIso = new Date().toISOString();
   const { data: matches } = await sb
     .from("matches")
@@ -153,7 +292,12 @@ export async function settleMatches(force = false): Promise<{ settled: string[] 
     .lte("starts_at", nowIso);
 
   const settled: string[] = [];
+  const failed: string[] = [];
+  const pending: string[] = [];
   const roster = await loadRoster(sb);
+  // Paus mellan matchrapporterna sa swehockey inte stryper andra anropet.
+  const PAUSE_MS = 1200;
+  let fetched = 0;
 
   for (const m of matches ?? []) {
     if (!force && m.status === "final" && m.result) {
@@ -165,11 +309,20 @@ export async function settleMatches(force = false): Promise<{ settled: string[] 
       if ((count ?? 0) > 0) continue;
     }
     try {
+      if (fetched > 0) await sleep(PAUSE_MS);
+      fetched++;
       const summary = await getGameSummary(m.swehockey_game_id as string);
+      // Matchen pagar fortfarande — rapporten visar stallningen sa langt.
+      // Settlar vi nu lases en halvfardig match som slutresultat.
+      if (!force && !summary.isFinal) {
+        pending.push(m.id);
+        continue;
+      }
       await settleOneMatch(sb, m, summary, roster);
       settled.push(m.id);
     } catch (e) {
-      console.error(`settle-fel match ${m.id}:`, e);
+      console.error(`settle-fel match ${m.id} (spel ${m.swehockey_game_id}):`, e);
+      failed.push(m.id);
     }
   }
 
@@ -177,7 +330,7 @@ export async function settleMatches(force = false): Promise<{ settled: string[] 
   const roundIds = new Set((matches ?? []).map((m) => m.round_id).filter(Boolean));
   for (const rid of roundIds) await recomputeRound(sb, rid as string);
 
-  return { settled };
+  return { settled, failed, pending, idsFound };
 }
 
 interface RosterEntry {
@@ -226,6 +379,16 @@ async function settleOneMatch(
   const oppGoals = match.is_home ? summary.awayGoals : summary.homeGoals;
   const sskWon = sskGoals != null && oppGoals != null && sskGoals > oppGoals;
 
+  // Vilken lagkod är SSK i den här rapporten ("SSK", "LIF" …)? Rapportens
+  // lagkolumn är säkrare än att gissa utifrån spelarnamn — en motståndare kan
+  // heta samma sak som någon i truppen.
+  const sskCode = String(match.is_home ? summary.homeTeam : summary.awayTeam).trim().toLowerCase();
+  const isSskTeam = (raw: string): boolean | null => {
+    const a = String(raw ?? "").trim().toLowerCase();
+    if (!a || !sskCode) return null; // okänd lagkod → låt namnmatchningen avgöra
+    return a === sskCode || a.startsWith(sskCode) || sskCode.startsWith(a);
+  };
+
   // ---- Utespelarstatistik ----
   type Acc = { goals: number; assists: number; pp: number; plus: number; minor: number; major: number; pim: number };
   const skater = new Map<string, Acc>();
@@ -238,16 +401,18 @@ async function settleOneMatch(
 
   for (const g of summary.goals) {
     const s = matchPlayer(roster, g.scorer);
-    const sskScored = !!(s && s.position !== "G");
-    if (s && s.position !== "G") {
+    const sskScored = isSskTeam(g.team) ?? !!(s && s.position !== "G");
+    if (sskScored && s && s.position !== "G") {
       acc(s.id).goals++;
       if (g.situation === "PP") acc(s.id).pp++;
     }
-    for (const a of g.assists) {
-      const ap = matchPlayer(roster, a);
-      if (ap && ap.position !== "G") {
-        acc(ap.id).assists++;
-        if (g.situation === "PP") acc(ap.id).pp++;
+    if (sskScored) {
+      for (const a of g.assists) {
+        const ap = matchPlayer(roster, a);
+        if (ap && ap.position !== "G") {
+          acc(ap.id).assists++;
+          if (g.situation === "PP") acc(ap.id).pp++;
+        }
       }
     }
     // +/- : SSK-spelare på isen. Vann SSK målet → Pos. Part. (+1), annars Neg. Part. (−1).
@@ -261,6 +426,7 @@ async function settleOneMatch(
 
   // Utvisningar (endast SSK-spelare): 2 min = minor, > 2 min = major
   for (const pen of summary.penalties) {
+    if (isSskTeam(pen.team) === false) continue;
     const p = matchPlayer(roster, pen.player);
     if (!p || p.position === "G") continue;
     const a = acc(p.id);
@@ -381,7 +547,7 @@ export async function recomputeRound(sb: Sb, roundId: string) {
 
   const { data: entries } = await sb
     .from("entries")
-    .select("id, goalie_id")
+    .select("id, goalie_id, captain_id")
     .eq("round_id", roundId);
 
   for (const e of entries ?? []) {
@@ -390,8 +556,12 @@ export async function recomputeRound(sb: Sb, roundId: string) {
       .select("player_id")
       .eq("entry_id", e.id);
 
+    // Kaptenen ger dubbla poäng — även när poängen är negativ.
     let total = 0;
-    for (const p of picks ?? []) total += skaterPts.get(p.player_id) ?? 0;
+    for (const p of picks ?? []) {
+      const pts = skaterPts.get(p.player_id) ?? 0;
+      total += p.player_id === e.captain_id ? pts * 2 : pts;
+    }
 
     // målvakt: poäng bara om gissad målvakt faktiskt var startande i någon match
     if (e.goalie_id) {

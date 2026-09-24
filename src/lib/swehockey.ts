@@ -13,8 +13,8 @@
 // Parsern nedan är verifierad mot en riktig färdigspelad match
 // (BIK Karlskoga–Södertälje SK, game 1113890: 1–2, 3 mål, 9 utv).
 //
-// OBS: den här vyn exponerar inte "spelare på isen" för +/-, så plus_minus
-// lämnas 0 från autoskrapningen. Admin-panelen kan komplettera vid behov.
+// Plus/minus läses ur "Pos. Part."/"Neg. Part." i målradens detaljcell:
+// deltagarlistorna finns i samma rad som målet.
 // ============================================================
 
 import * as cheerio from "cheerio";
@@ -74,19 +74,47 @@ export interface GameSummary {
   penalties: ScrapedPenalty[];
   goalies: { home: ScrapedGoalie[]; away: ScrapedGoalie[] };
   overtime: boolean;
+  /** true forst nar rapporten skrivit ut "Final Score" — dvs matchen ar slut. */
+  isFinal: boolean;
 }
 
 // ------------------------------------------------------------
 // Låg nivå
 // ------------------------------------------------------------
+const FETCH_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
+
+export function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * swehockey stryper korta skurar av anrop: andra hämtningen i samma körning
+ * kan svara 4xx/5xx eller brytas. Utan omförsök innebar det att match tva i
+ * en omgang tyst aldrig settlades. Darfor: omforsok med vaxande paus.
+ */
 export async function fetchHtml(path: string): Promise<string> {
   const url = path.startsWith("http") ? path : `${BASE}${path}`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": UA, "Accept-Language": "sv,en" },
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`swehockey ${res.status} för ${url}`);
-  return res.text();
+  let lastErr: unknown = null;
+
+  for (let attempt = 1; attempt <= FETCH_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, "Accept-Language": "sv,en" },
+        cache: "no-store",
+      });
+      if (res.ok) return await res.text();
+      lastErr = new Error(`swehockey ${res.status} för ${url}`);
+      // 4xx som inte är strypning är lönlöst att försöka om.
+      if (res.status !== 429 && res.status < 500) {
+        if (res.status !== 403 && res.status !== 408) throw lastErr;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+    if (attempt < FETCH_RETRIES) await sleep(RETRY_DELAY_MS * attempt);
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`swehockey-fel för ${url}`);
 }
 
 /** Extraherar alla tabeller som matriser av cell-text. */
@@ -184,31 +212,69 @@ async function resolveGameIds(
     // Bara matcher som spelats eller narmar sig - resten far id senare.
     if (new Date(`${ymd}T00:00:00`).getTime() > cutoff) continue;
 
-    if (!cache.has(ymd)) {
-      cache.set(ymd, await gameIdForDate(ymd, teamName));
+    // Klubben kan ha flera lag i spel samma dag (J20, dam, trakningsmatcher).
+    // Darfor maste bade SSK OCH motstandaren finnas i raden.
+    const key = `${ymd}|${m.opponent}`;
+    if (!cache.has(key)) {
+      cache.set(key, await gameIdForDate(ymd, teamName, m.opponent));
     }
-    m.swehockeyGameId = cache.get(ymd) ?? null;
+    m.swehockeyGameId = cache.get(key) ?? null;
   }
   return matches;
 }
 
-/** Plockar SSK:s spel-id for ett datum ur /GamesByDate. */
-async function gameIdForDate(ymd: string, teamName: string): Promise<string | null> {
+/**
+ * Exporterad for settle-lage: spel-id publiceras forst kring matchstart, sa
+ * schema-synken pa morgonen hittar inget for kvallens match. Resultatkorningen
+ * slar darfor upp id:t sjalv nar matchen val ar spelad.
+ */
+export async function lookupGameId(
+  ymd: string,
+  opponent: string,
+  teamName = "Södertälje"
+): Promise<string | null> {
+  return gameIdForDate(ymd, teamName, opponent);
+}
+
+/**
+ * Plockar spel-id for ETT datum och EN motstandare ur /GamesByDate.
+ * Motstandaren maste matcha: 20 sep 2026 spelade tre SSK-lag samma dag
+ * (A-laget mot Visby/Roma, plus tva ungdomsmatcher). Att bara ta forsta
+ * raden med "Sodertalje" skulle kunna knyta fel matchrapport till omgangen.
+ */
+async function gameIdForDate(
+  ymd: string,
+  teamName: string,
+  opponent: string
+): Promise<string | null> {
   try {
     const html = await fetchHtml(`/GamesByDate/${ymd}`);
     const $ = cheerio.load(html);
-    let found: string | null = null;
+    const team = teamName.toLowerCase();
+    const opp = clean(opponent).toLowerCase();
+    const sskRows: string[] = [];
+    let exact: string | null = null;
+
     $("tr").each((_, tr) => {
-      if (found) return;
-      const cells = $(tr).find("td").length;
-      if (!cells || cells > MAX_ROW_CELLS) return;
+      if (exact) return;
+      const cellCount = $(tr).find("td").length;
+      if (!cellCount || cellCount > MAX_ROW_CELLS) return;
       const txt = clean($(tr).text()).toLowerCase();
-      if (!txt.includes(teamName.toLowerCase())) return;
+      if (!txt.includes(team)) return;
       const href = $(tr).find('a[href*="/Game/"]').attr("href") || "";
       const m = href.match(/\/Game\/\w+\/(\d+)/);
-      if (m) found = m[1];
+      if (!m) return;
+      sskRows.push(m[1]);
+      if (opp && txt.includes(opp)) exact = m[1];
     });
-    return found;
+
+    if (exact) return exact;
+    // Ingen motstandartraff: bara sakert om dagen har exakt en SSK-match.
+    if (sskRows.length === 1) return sskRows[0];
+    if (sskRows.length > 1) {
+      console.error(`flera SSK-matcher ${ymd}, ingen matchade "${opponent}" - hoppar over`);
+    }
+    return null;
   } catch (e) {
     console.error(`kunde inte hamta spel-id for ${ymd}:`, e);
     return null;
@@ -354,14 +420,15 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
           : sit === "EN"
           ? "EN"
           : "EQ";
+        const part = parseParticipants(r[4] ?? "");
         goals.push({
           team,
           scorer: players[0].name,
           assists: players.slice(1, 3).map((p) => p.name),
           situation,
           time: c0,
-          posPart: [],
-          negPart: [],
+          posPart: part.pos,
+          negPart: part.neg,
         });
       }
       continue;
@@ -381,6 +448,12 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
       html
     );
 
+  // Rapporten finns redan medan matchen pagar, med stallningen sa langt.
+  // "Final Score" skrivs ut forst vid slutsignal — utan den kollen skulle en
+  // korning i andra perioden lasa en halvfardig match som slutresultat.
+  const pageText = clean($("body").text());
+  const isFinal = /final score/i.test(pageText);
+
   return {
     gameId,
     homeTeam,
@@ -391,6 +464,7 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
     penalties,
     goalies: { home: goaliesHome, away: goaliesAway },
     overtime,
+    isFinal,
   };
 }
 
@@ -400,6 +474,22 @@ export function parseGameSummary(gameId: string, html: string): GameSummary {
  * → scorer först, resten assist. swehockey klistrar ibland ihop
  *   "Namn19. Nästa" utan mellanslag → vi normaliserar det först.
  */
+/**
+ * Maldetaljcellen innehaller deltagarlistorna:
+ *   "Pos. Part.: 19 , 61 , 71 , 73 , 82 , 95 Neg. Part.: 1 , 6 , 11 , 15 , 23 , 24"
+ * Pos. Part. = spelare pa isen i det GORANDE laget, Neg. Part. = det slappande.
+ * Tomma listor ar giltiga (t.ex. straffmal) och ger bara plus_minus 0.
+ */
+export function parseParticipants(detail: string): { pos: number[]; neg: number[] } {
+  const norm = clean(detail);
+  const nums = (m: RegExpMatchArray | null): number[] =>
+    m ? (m[1].match(/\d{1,3}/g) ?? []).map((n) => parseInt(n, 10)) : [];
+  return {
+    pos: nums(norm.match(/Pos\.?\s*Part\.?\s*:?\s*([\d\s,]+)/i)),
+    neg: nums(norm.match(/Neg\.?\s*Part\.?\s*:?\s*([\d\s,]+)/i)),
+  };
+}
+
 function splitPlayers(str: string): { no: number; name: string }[] {
   const norm = str.replace(/([A-Za-zÅÄÖåäö)])(\d{1,3}\.)/g, "$1 $2");
   return norm
