@@ -4,16 +4,6 @@ import { useMemo, useState, useTransition } from "react";
 import type { Match, Player, Round } from "@/lib/types";
 import { saveEntry, saveTips } from "@/lib/actions";
 import { Jersey } from "./Jersey";
-import { SKATER_2526, GOALIE_2526 } from "@/lib/player-stats-2526";
-
-function skaterStatLine(name: string): string {
-  const s = SKATER_2526[name];
-  return s ? `’25/26: ${s.g}+${s.a}=${s.tp}p · ${s.gp} GP` : "Ny i klubben";
-}
-function goalieStatLine(name: string): string {
-  const g = GOALIE_2526[name];
-  return g ? `’25/26: ${g.gp} M · ${(g.svs * 100).toFixed(1)}% · ${g.gaa.toFixed(2)} GAA` : "Ny i klubben";
-}
 
 function isoWeekOf(d: Date): { year: number; week: number } {
   const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -280,9 +270,8 @@ export function FemmaPicker({
                         : "border-ssk-line bg-ssk-cream hover:border-ssk-blue hover:bg-ssk-goldSoft"
                     }`}>
                     <Jersey number={g.jersey_no} size={24} />
-                    <span className="min-w-0">
+                    <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] leading-tight">{g.full_name}</span>
-                      <span className="block text-[10px] leading-tight text-ssk-muted">{goalieStatLine(g.full_name)}</span>
                     </span>
                     <PointsChip last={pointsLast[g.id]} season={pointsSeason[g.id]} />
                   </button>
@@ -512,10 +501,7 @@ function PickSection({
                   : "border-ssk-line bg-ssk-cream hover:border-ssk-blue hover:bg-ssk-goldSoft disabled:opacity-40"
               }`}>
               <Jersey number={p.jersey_no} size={22} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] leading-tight">{p.full_name}</span>
-                <span className="block text-[10px] leading-tight text-ssk-muted">{skaterStatLine(p.full_name)}</span>
-              </span>
+              <span className="min-w-0 flex-1 truncate text-[13px] leading-tight">{p.full_name}</span>
               <PointsChip last={pointsLast[p.id]} season={pointsSeason[p.id]} />
             </button>
           );
