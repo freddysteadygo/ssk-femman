@@ -9,6 +9,7 @@ export function NavBar({ isLoggedIn, isAdmin }: { isLoggedIn: boolean; isAdmin: 
 
   const links = [
     ...(isLoggedIn ? [{ href: "/spela", label: "Spela" }] : []),
+    ...(isLoggedIn ? [{ href: "/omgangar", label: "Omgångar" }] : []),
     { href: "/ligor", label: "Ligor" },
     { href: "/slutspel", label: "Slutspel" },
     { href: "/scoreboard", label: "Scoreboard" },

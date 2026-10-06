@@ -256,6 +256,10 @@ export async function carryOverEntries(sb: Sb, roundId: string): Promise<number>
 // Hur lange efter matchstart vi fortsatter leta spel-id.
 const ID_LOOKUP_WINDOW_DAYS = 4;
 
+// Efter sa har manga timmar settlar vi aven utan slutmarkering i rapporten.
+// En match inklusive forlangning och straffar tar knappt 3 h, sa 6 ar tryggt.
+const LATE_SETTLE_HOURS = 6;
+
 /**
  * swehockey publicerar ingen matchlank forran kring matchstart — schemasidan
  * for en kommande match ar helt utan lankar. Schema-synken 06:00 hittar alltsa
@@ -336,11 +340,26 @@ export async function settleMatches(
       if (fetched > 0) await sleep(PAUSE_MS);
       fetched++;
       const summary = await getGameSummary(m.swehockey_game_id as string);
+
       // Matchen pagar fortfarande — rapporten visar stallningen sa langt.
       // Settlar vi nu lases en halvfardig match som slutresultat.
+      //
+      // Skyddsnat: saknas slutmarkeringen lange efter matchstart ar det
+      // sannolikt en formulering vi inte kanner till, inte en match som
+      // fortfarande pagar. Da settlar vi anda — annars hanger matchen tyst
+      // for alltid, vilket ar precis vad som hande nar "Game Winning Shots"
+      // dok upp i stallet for "Final Score".
+      const hoursSinceStart =
+        (Date.now() - new Date(m.starts_at).getTime()) / 3_600_000;
       if (!force && !summary.isFinal) {
-        pending.push(m.id);
-        continue;
+        if (hoursSinceStart < LATE_SETTLE_HOURS) {
+          pending.push(m.id);
+          continue;
+        }
+        console.error(
+          `slutmarkering saknas for match ${m.id} (spel ${m.swehockey_game_id}) ` +
+            `${hoursSinceStart.toFixed(1)} h efter start — settlar anda`
+        );
       }
       await settleOneMatch(sb, m, summary, roster, unmatched);
       settled.push(m.id);
@@ -452,8 +471,10 @@ async function settleOneMatch(
     }
     const byName = matchPlayer(roster, name);
     if (byName) return byName;
-    // Okand spelare — nastan alltid nagon som saknas i truppen.
-    if (name) unmatched.add(`${no != null ? no + ". " : ""}${name}`);
+    // Lagstraff och baskstraff hor inte till nagon spelare — det ar inte en
+    // lucka i truppen och ska darfor inte rapporteras som en.
+    const notAPlayer = no == null && /team|bench|coach|too many/i.test(name);
+    if (name && !notAPlayer) unmatched.add(`${no != null ? no + ". " : ""}${name}`);
     return null;
   };
   const acc = (id: string): Acc => {
@@ -499,6 +520,29 @@ async function settleOneMatch(
     a.pim += pen.minutes;
     if (pen.minutes > 2) a.major++;
     else a.minor++;
+  }
+
+  // ---- Enskilda mal (for matchbilden i omgangshistoriken) ----
+  // Skrapan har redan tid, malskytt, assisterande och spelform. Utan det
+  // har steget kastas de bort efter poangrakningen och matchen gar inte att
+  // aterberatta efterat.
+  await sb.from("match_goals").delete().eq("match_id", match.id);
+  const goalRows = summary.goals.map((g) => {
+    const [mm, ss] = (g.time || "0:00").split(":").map((x) => parseInt(x, 10) || 0);
+    return {
+      match_id: match.id,
+      second: mm * 60 + ss,
+      time_text: g.time || null,
+      situation: g.situation,
+      is_ssk: isSskTeam(g.team) ?? false,
+      scorer: g.scorer,
+      assists: g.assists,
+    };
+  });
+  if (goalRows.length) {
+    const { error: goalErr } = await sb.from("match_goals").insert(goalRows);
+    // Matchbilden ar trevlig men inte kritisk — poangen far inte falla pa den.
+    if (goalErr) console.error(`kunde inte spara mal for match ${match.id}:`, goalErr);
   }
 
   // rensa gamla stats för matchen och skriv nya
