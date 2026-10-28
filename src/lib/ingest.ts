@@ -38,18 +38,83 @@ function isoWeek(d: Date): { year: number; week: number } {
   return { year: date.getUTCFullYear(), week };
 }
 
+const STHLM = "Europe/Stockholm";
+
+// Wall-clock i Stockholm -> ratt UTC-tidpunkt, oavsett sommar- eller vintertid.
+// Tidigare hardkodades +02:00, vilket gav en timmes fel pa alla matcher efter
+// att klockan stallts om i slutet av oktober.
+function stockholmWallClock(ymd: string, hhmm: string): Date | null {
+  const [y, mo, d] = ymd.split("-").map(Number);
+  const [h, mi] = hhmm.split(":").map(Number);
+  if ([y, mo, d, h, mi].some((n) => !Number.isFinite(n))) return null;
+  const want = `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
+  const fmt = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: STHLM,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  for (const offset of [2, 1]) {
+    const guess = new Date(Date.UTC(y, mo - 1, d, h - offset, mi));
+    if (fmt.format(guess) === want) return guess;
+  }
+  return new Date(Date.UTC(y, mo - 1, d, h - 1, mi));
+}
+
+// Hela speldygnet i Stockholm som [from, to) i UTC.
+function stockholmDayRange(ymd: string): { from: string; to: string } | null {
+  const start = stockholmWallClock(ymd, "00:00");
+  if (!start) return null;
+  const [y, mo, d] = ymd.split("-").map(Number);
+  const nextYmd = new Date(Date.UTC(y, mo - 1, d + 1)).toISOString().slice(0, 10);
+  const end =
+    stockholmWallClock(nextYmd, "00:00") ??
+    new Date(start.getTime() + 24 * 3_600_000);
+  return { from: start.toISOString(), to: end.toISOString() };
+}
+
 function parseDate(raw: string): Date | null {
   const m = raw.match(/(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}[:.]\d{2}))?/);
   if (!m) return null;
-  const time = (m[2] || "19:00").replace(".", ":");
-  const d = new Date(`${m[1]}T${time}:00+02:00`); // Europe/Stockholm ~ approx
-  return isNaN(d.getTime()) ? null : d;
+  const [hh, mm] = (m[2] || "19:00").replace(".", ":").split(":");
+  return stockholmWallClock(m[1], `${hh.padStart(2, "0")}:${mm}`);
+}
+
+// Vid dubbletter: behall raden med flest resultattips (annars forsvinner
+// nagons tips, result_tips har on delete cascade), darefter den som redan
+// har ett swehockey-id, darefter den aldsta.
+async function pickSurvivor(
+  sb: Sb,
+  rows: { id: string; swehockey_game_id: string | null; created_at: string }[]
+): Promise<string> {
+  const ids = rows.map((r) => r.id);
+  const { data: tips } = await sb
+    .from("result_tips")
+    .select("match_id")
+    .in("match_id", ids);
+  const count = new Map<string, number>();
+  for (const t of tips ?? [])
+    count.set(t.match_id as string, (count.get(t.match_id as string) ?? 0) + 1);
+  const ranked = [...rows].sort((a, b) => {
+    const ta = count.get(a.id) ?? 0;
+    const tb = count.get(b.id) ?? 0;
+    if (ta !== tb) return tb - ta;
+    const ga = a.swehockey_game_id ? 1 : 0;
+    const gb = b.swehockey_game_id ? 1 : 0;
+    if (ga !== gb) return gb - ga;
+    return a.created_at.localeCompare(b.created_at);
+  });
+  return ranked[0].id;
 }
 
 // ------------------------------------------------------------
 // 1) SCHEMA-SYNK
 // ------------------------------------------------------------
-export async function syncSchedule(): Promise<{ rounds: number; matches: number }> {
+export async function syncSchedule(): Promise<{
+  rounds: number;
+  matches: number;
+  duplicatesRemoved: number;
+}> {
   const seasonId = process.env.SWEHOCKEY_SEASON_ID;
   if (!seasonId) throw new Error("SWEHOCKEY_SEASON_ID saknas");
   const sb = createAdminClient();
@@ -57,6 +122,7 @@ export async function syncSchedule(): Promise<{ rounds: number; matches: number 
   const fixtures = await getSskSchedule(seasonId);
   let roundsUpserted = 0;
   let matchesUpserted = 0;
+  let duplicatesRemoved = 0;
 
   // gruppera per ISO-vecka
   const byWeek = new Map<string, typeof fixtures>();
@@ -115,21 +181,49 @@ export async function syncSchedule(): Promise<{ rounds: number; matches: number 
             : null,
       };
 
-      // Idempotent: hitta befintlig match (på game-id, annars motståndare+tid)
-      // så upprepade körningar uppdaterar istället för att skapa dubbletter.
+      // Idempotent: hitta befintlig match. Forst pa game-id, annars pa
+      // motstandare + samma speldygn - INTE exakt starttid. Swehockey
+      // flyttar avsparkstider, och varje flytt skapade tidigare en ny rad
+      // i stallet for att uppdatera den befintliga. Finns redan flera
+      // rader for samma motstandare och dygn stadas de overflodiga bort har.
       let existing: { id: string } | null = null;
       if (f.swehockeyGameId) {
-        const r = await sb.from("matches").select("id").eq("swehockey_game_id", f.swehockeyGameId).maybeSingle();
-        existing = r.data;
-      }
-      if (!existing) {
         const r = await sb
           .from("matches")
           .select("id")
-          .eq("opponent", f.opponent)
-          .eq("starts_at", startIso)
+          .eq("swehockey_game_id", f.swehockeyGameId)
           .maybeSingle();
         existing = r.data;
+      }
+      if (!existing) {
+        const ymd = (f.date.match(/\d{4}-\d{2}-\d{2}/) || [""])[0];
+        const day = ymd ? stockholmDayRange(ymd) : null;
+        if (day) {
+          const { data: sameDay } = await sb
+            .from("matches")
+            .select("id, swehockey_game_id, created_at")
+            .eq("opponent", f.opponent)
+            .gte("starts_at", day.from)
+            .lt("starts_at", day.to)
+            .order("created_at", { ascending: true });
+          const rows = (sameDay ?? []) as {
+            id: string;
+            swehockey_game_id: string | null;
+            created_at: string;
+          }[];
+          if (rows.length === 1) {
+            existing = { id: rows[0].id };
+          } else if (rows.length > 1) {
+            const keep = await pickSurvivor(sb, rows);
+            existing = { id: keep };
+            const drop = rows.map((r) => r.id).filter((id) => id !== keep);
+            if (drop.length) {
+              const { error } = await sb.from("matches").delete().in("id", drop);
+              if (error) console.error("dubblettstadning-fel:", error.message);
+              else duplicatesRemoved += drop.length;
+            }
+          }
+        }
       }
 
       if (existing) await sb.from("matches").update(payload).eq("id", existing.id);
@@ -152,7 +246,11 @@ export async function syncSchedule(): Promise<{ rounds: number; matches: number 
     console.error("carry-over-fel:", e);
   }
 
-  return { rounds: roundsUpserted, matches: matchesUpserted };
+  return {
+    rounds: roundsUpserted,
+    matches: matchesUpserted,
+    duplicatesRemoved,
+  };
 }
 
 // ------------------------------------------------------------
